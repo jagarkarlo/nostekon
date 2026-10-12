@@ -35,6 +35,12 @@ The output is in `dist/app/`. Available targets are `linux/amd64`, `linux/arm64`
 `amd64` is x86-64, including most Intel/AMD PCs; `arm64` includes Apple Silicon.
 Check the machine you will run on, not just the build host.
 
+Build Studio with the default `/` base before packaging. A preceding site build
+uses `/demo/`; rebuild with `npm run build --prefix studio` afterward. The package
+builder rejects that incompatible site build with exit `2` before creating output.
+An archive being produced is not proof that its browser assets work: verify the
+extracted Linux app below and inspect its reported revision.
+
 ## Verify and extract
 
 Obtain the archive and its `SHA256SUMS` together from a trusted source. On Linux:
@@ -69,6 +75,28 @@ also starts the app from its own directory. These binaries are not OS-signed;
 SmartScreen or Gatekeeper may block them. Do not bypass organizational security
 controls. Use an approved source build or Docker when appropriate. Checksums
 detect transfer damage, not publisher identity or recovery success.
+
+## Review backup plans offline
+
+Current source builds include Studio's **Plan review** and the independent report
+binary. Open the app, import the original captured DrillRun, then attach its original
+restore plan; or use the packaged binary without starting a server:
+
+```bash
+./nostekon-report --backup-plan /protected/orders-plan.json /protected/orders.run.json
+./nostekon-report --backup-bundle /protected/orders.backup-review.zip
+```
+
+Use the `.exe` filename on Windows. A failed or incomplete original stays failed;
+cached bundle receipts are never authoritative. See the
+[backup rehearsal guide](postgresql-backup-rehearsal.md) for gate exit codes,
+bundle limits, approval and evidence-handling rules. These commands evaluate
+existing files only; they do not restore a database.
+
+The portable archive does **not** include the Python backup runner. Planning,
+preflight, restore and guarded cleanup require the separate Python installation,
+approved inputs and dedicated local Docker host described in that guide. Installing
+the evidence app does not authorize production access or enable backup execution.
 
 ## Configure and identify
 
