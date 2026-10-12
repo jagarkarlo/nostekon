@@ -425,6 +425,26 @@ edition is not planned until the open-source restore workflow works reliably
 end to end and operators validate a concrete need for supported deployments,
 policy controls, or fleet-wide reporting.
 
+## Rehearse a real backup
+
+The host CLI can test an approved PostgreSQL custom-format backup without
+connecting to production. It restores into a disposable local Docker target with
+no network, no writable host mount and bounded resources. Linux, the Python CLI,
+local Docker and a cached trusted `postgres:16.8` image are required:
+
+```bash
+nostekon backup restore --file /approved/backups/orders.dump \
+  --output evidence/orders-rehearsal.run.json --expect-table public.orders=1250
+```
+
+Use an expected count from the same snapshot. Input is bounded to 64 MiB;
+database storage to 512 MiB. Requested depth is V2 without counts or V3 with them.
+Import the recorded JSON into Studio or evaluate it with `nostekon-report`.
+Timing is rehearsal duration, not incident RTO; RPO remains unmeasured without a
+ledger. Direct production access, application readiness and in-place restoration
+are not provided. See the
+[backup rehearsal runbook and production gates](site/src/content/docs/guides/postgresql-backup-rehearsal.md).
+
 ## Related projects
 
 Nostekon builds on these tools and is evaluated against them:

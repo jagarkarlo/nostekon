@@ -8,6 +8,7 @@ expected_routes=(/ /product/ /evidence/ /download/ /demo/ /roadmap/ /legal/priva
   /reference/drill-spec/ /reference/drillrun-evidence/)
 docs_routes=(/docs/ /docs/start/ /docs/levels/ /docs/comparison/
   /docs/guides/portable-app/
+  /docs/guides/postgresql-backup-rehearsal/
   /docs/guides/k3d-isolated-restore/ /docs/guides/ci-recovery-gate/ /docs/guides/metrics-and-dashboard/
   /docs/concepts/how-it-works/ /docs/concepts/write-ledger-rpo/ /docs/concepts/isolated-restores/
   /docs/reference/drill-spec/ /docs/reference/drillrun-evidence/)

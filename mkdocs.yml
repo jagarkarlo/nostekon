@@ -61,6 +61,7 @@ nav:
       - Installation: start.md
       - Portable app and backups: guides/portable-app.md
       - First restore drill: guides/k3d-isolated-restore.md
+      - Rehearse a real PostgreSQL backup: guides/postgresql-backup-rehearsal.md
       - CI recovery gate: guides/ci-recovery-gate.md
       - Recovery metrics and dashboard: guides/metrics-and-dashboard.md
   - Understand the Evidence:

@@ -4,6 +4,7 @@ import ProductLayout from "../layouts/ProductLayout.astro";
 const description = "Nostekon's roadmap: what already works, and the work needed to make one isolated restore drill trustworthy end to end.";
 
 const phases = [
+  { title: "Rehearse real backup files", state: "Done, early", later: false, items: ["PostgreSQL custom archives restored on a local isolated Docker target", "No production connection, credentials, ports or writable host mounts", "Snapshot-bound hashes, explicit row expectations and failure evidence", "Cleanup and independent Go/Studio report evaluation", "Next gate: an approved sanitized production-origin backup pilot"] },
   { title: "Define the drill", state: "Done", later: false, items: ["Versioned YAML drill contract", "Scenario templates and the interactive Studio", "Strict validation in the Go API"] },
   { title: "Evaluate recorded evidence", state: "Done, early", later: false, items: ["V0 to V4 verdicts with the first failed level", "Recovery time by phase, including unaccounted time", "Exact data loss from an acknowledged-write ledger", "Studio report review and export", "Local and optional server-side signed-evidence verification", "Prometheus metrics and a bundled Grafana dashboard"] },
   { title: "Run isolated policy suites", state: "Done, lab only", later: false, items: ["Separate source and restore k3d clusters", "Delete the source namespace after backup", "Bounded PostgreSQL writes with a durable host ledger", "V3 row count and validated V4 restored IDs", "Zero-loss, strict tail-loss and budgeted-loss cases", "Atomic summaries and partial capture retention", "Independent Go CLI suite gate and Studio review export", "Clean up namespaces"] },
@@ -15,7 +16,7 @@ const phases = [
   <section class="page-title">
     <div class="wrap">
       <h1>Make one drill trustworthy end to end</h1>
-      <p class="lead">The next hard problem is not another dashboard. It is running one isolated PostgreSQL recovery safely, collecting the evidence from the system instead of from the runner's say-so, and cleaning up properly when something goes wrong.</p>
+      <p class="lead">Real PostgreSQL backup files can now be rehearsed locally without contacting production. The next gate is a controlled production-origin backup pilot, then approved backup access, application checks and independently measured data loss.</p>
     </div>
   </section>
 
@@ -40,7 +41,7 @@ const phases = [
       </div>
       <div class="prose">
         <p>Restore orchestration touches clusters, storage and application data, so the first version is deliberately narrow: one supported stack, one separate restore cluster, one scenario, a bounded run time and explicit cleanup.</p>
-        <p>Nothing here involves production restores, production credentials or a public package release.</p>
+        <p>Production-origin backups stay on isolated restore targets. Direct production connections, failure injection and in-place restores remain unsupported. <a class="link" href="/docs/guides/postgresql-backup-rehearsal/">Backup rehearsal guide and readiness gates</a></p>
       </div>
     </div>
   </section>
