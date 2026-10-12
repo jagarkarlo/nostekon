@@ -17,6 +17,28 @@ import (
 	"github.com/jagarkarlo/nostekon/internal/attest"
 )
 
+func TestBackupPlanModeRejectsConflictingOptions(t *testing.T) {
+	for _, options := range [][]string{
+		{"--suite"}, {"--attestation", "sidecar.json", "--trusted-key", "key.pem"},
+		{"--pushgateway-url", "http://127.0.0.1:1"}, {"--pushgateway-job", "custom"},
+		{"--pushgateway-instance", "custom"},
+	} {
+		var output, problems bytes.Buffer
+		args := append([]string{"--backup-plan", "plan.json"}, options...)
+		args = append(args, "run.json")
+		if code := Run(args, &output, &problems); code != 2 || output.Len() != 0 {
+			t.Fatalf("conflicting options accepted: %v, %d, %s", options, code, problems.String())
+		}
+	}
+}
+
+func TestBackupPlanModeRoutesMissingInputToAdmissionError(t *testing.T) {
+	var output, problems bytes.Buffer
+	if code := Run([]string{"--backup-plan", "missing-plan.json", "run.json"}, &output, &problems); code != 2 || !strings.Contains(problems.String(), "read backup plan:") || output.Len() != 0 {
+		t.Fatalf("gate did not route missing plan: %d %s", code, problems.String())
+	}
+}
+
 func TestRunSuiteGateAcceptsExpectedPolicyFailure(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"--suite", "../../examples/suites/postgresql-policy"}, &stdout, &stderr)

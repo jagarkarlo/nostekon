@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/jagarkarlo/nostekon/internal/attest"
+	"github.com/jagarkarlo/nostekon/internal/backupreview"
 	"github.com/jagarkarlo/nostekon/internal/metrics"
 	"github.com/jagarkarlo/nostekon/internal/suitereview"
 	"github.com/jagarkarlo/nostekon/internal/verify"
@@ -16,10 +17,38 @@ import (
 
 const maxReportInputBytes = 16 << 20
 
+func readBackupInput(path string, limit int64) ([]byte, error) {
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !before.Mode().IsRegular() || before.Size() < 1 || before.Size() > limit {
+		return nil, errors.New("input must be a nonempty regular file within its size limit")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
+		return nil, errors.New("input changed while opening")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	after, err := file.Stat()
+	if err != nil || len(data) > int(limit) || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+		return nil, errors.New("input changed or exceeded its size limit while reading")
+	}
+	return data, nil
+}
+
 // Run evaluates a captured DrillRun file. The exported entry point is shared
 // by the standalone command and tests.
 func Run(args []string, stdout, stderr io.Writer) int {
-	usage := "usage: nostekon-report [--suite] [--attestation FILE --trusted-key PUBLIC.pem] [--pushgateway-url URL [--pushgateway-job NAME] [--pushgateway-instance NAME]] <run.json | suite-directory | evidence.zip>"
+	usage := "usage: nostekon-report [--suite | --backup-plan PLAN.json] [--attestation FILE --trusted-key PUBLIC.pem] [--pushgateway-url URL [--pushgateway-job NAME] [--pushgateway-instance NAME]] <run.json | suite-directory | evidence.zip>"
 	if len(args) == 0 || len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Fprintln(stderr, usage)
 		if len(args) == 1 {
@@ -30,6 +59,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("nostekon-report", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	suiteMode := flags.Bool("suite", false, "gate a captured PostgreSQL policy suite directory or evidence ZIP")
+	backupPlanPath := flags.String("backup-plan", "", "independently gate captured backup evidence against a reviewed restore plan")
 	attestationPath := flags.String("attestation", "", "detached Ed25519 attestation JSON file")
 	trustedKeyPath := flags.String("trusted-key", "", "trusted Ed25519 PKIX public key PEM")
 	pushgatewayURL := flags.String("pushgateway-url", "", "push recovery metrics to this Prometheus Pushgateway URL")
@@ -42,6 +72,43 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if flags.NArg() != 1 || (*attestationPath == "") != (*trustedKeyPath == "") {
 		fmt.Fprintln(stderr, usage)
 		return 2
+	}
+	backupMode := false
+	flags.Visit(func(option *flag.Flag) {
+		if option.Name == "backup-plan" {
+			backupMode = true
+		}
+	})
+	if backupMode {
+		if *suiteMode || *attestationPath != "" || *pushgatewayURL != "" || *pushgatewayJob != "nostekon" || *pushgatewayInstance != "" {
+			fmt.Fprintln(stderr, "backup-plan mode cannot use suite, attestation or Pushgateway flags")
+			return 2
+		}
+		planData, err := readBackupInput(*backupPlanPath, backupreview.MaxPlanBytes)
+		if err != nil {
+			fmt.Fprintf(stderr, "read backup plan: %v\n", err)
+			return 2
+		}
+		evidenceData, err := readBackupInput(flags.Arg(0), maxReportInputBytes)
+		if err != nil {
+			fmt.Fprintf(stderr, "read backup evidence: %v\n", err)
+			return 2
+		}
+		review, err := backupreview.Evaluate(planData, evidenceData)
+		if err != nil {
+			fmt.Fprintf(stderr, "review backup: %v\n", err)
+			return 2
+		}
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(review); err != nil {
+			fmt.Fprintf(stderr, "write backup review: %v\n", err)
+			return 2
+		}
+		if review.Passed {
+			return 0
+		}
+		return 1
 	}
 	if *suiteMode {
 		if *attestationPath != "" || *pushgatewayURL != "" || *pushgatewayJob != "nostekon" || *pushgatewayInstance != "" {

@@ -1310,6 +1310,7 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
             == 1
         )
         planned_runs = []
+        backup_reviews = []
         for expected, exit_code, verdict in [(3, 0, "verified"), (4, 1, "failed")]:
             plan_path = tmp_path / f"plan-{expected}.json"
             planned_output = tmp_path / f"planned-{expected}.json"
@@ -1349,6 +1350,7 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
                 for check in recorded["status"]["checks"]
             )
             planned_runs.append((planned_output, exit_code, verdict))
+            backup_reviews.append((plan_path, planned_output, exit_code, True))
         semantic_runs = []
         for scenario, table, exit_code in [
             ("good", "public.orders", 0),
@@ -1419,6 +1421,14 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
             if scenario == "restore-error":
                 assert all("not evaluated" in check["detail"] for check in checks)
             semantic_runs.append((run_path, exit_code, "failed" if exit_code else "verified"))
+            backup_reviews.append(
+                (
+                    plan_path,
+                    run_path,
+                    exit_code,
+                    scenario in ("good", "violations", "nulls-ignored"),
+                )
+            )
         backup.write_bytes(backup.read_bytes() + b"changed after planning")
         rejected_output = tmp_path / "rejected.json"
         assert (
@@ -1445,6 +1455,55 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
             check=True,
             timeout=60,
         )
+        captures = tmp_path / "verified-captures"
+        captures.mkdir(mode=0o700)
+        for plan_path, source, exit_code, complete in backup_reviews:
+            original = source.read_bytes()
+            evaluation = subprocess.run(
+                [str(report_binary), "--backup-plan", str(plan_path), str(source)],
+                capture_output=True,
+                timeout=15,
+            )
+            assert evaluation.returncode == exit_code, evaluation.stderr.decode()
+            review = json.loads(evaluation.stdout)
+            assert review["kind"] == "PostgreSQLBackupReview"
+            assert review["passed"] == (exit_code == 0)
+            assert review["complete"] == complete
+            assert review["evidenceMatches"] == (source.name != "restore-error-v4.json")
+            plan = restore.load_restore_plan(plan_path)
+            identity = hashlib.sha256(
+                json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            assert review["planSHA256"] == identity
+            assert review["planFileSHA256"] == hashlib.sha256(plan_path.read_bytes()).hexdigest()
+            assert review["evidenceSHA256"] == hashlib.sha256(original).hexdigest()
+            assert review["provenance"]["status"] == "unverified"
+            assert review["report"]["rpo"] is None
+            assert source.read_bytes() == original
+            for filename, payload in [
+                (plan_path.name, plan_path.read_bytes()),
+                (source.name, original),
+                (source.stem + ".review.json", evaluation.stdout),
+            ]:
+                destination = captures / filename
+                with destination.open("xb") as artifact:
+                    os.fchmod(artifact.fileno(), 0o600)
+                    artifact.write(payload)
+        altered = tmp_path / "tampered-count.json"
+        recorded = json.loads((tmp_path / "planned-3.json").read_text())
+        for check in recorded["status"]["checks"]:
+            if check["name"] == "Row count: public.orders":
+                check["detail"] = "expected 3; measured 2"
+        altered.write_text(json.dumps(recorded))
+        evaluation = subprocess.run(
+            [str(report_binary), "--backup-plan", str(tmp_path / "plan-3.json"), str(altered)],
+            capture_output=True,
+            timeout=15,
+        )
+        assert evaluation.returncode == 1, evaluation.stderr.decode()
+        review = json.loads(evaluation.stdout)
+        assert review["report"]["verdict"] == "verified"
+        assert not review["passed"] and not review["evidenceMatches"]
         for source, exit_code, verdict in [
             (passing, 0, "verified"),
             (failing, 1, "failed"),

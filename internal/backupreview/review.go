@@ -366,5 +366,6 @@ func Evaluate(planData, evidenceData []byte) (Review, error) {
 	review.Complete = !missing && review.Report.Verdict != verify.Incomplete
 	review.EvidenceMatches = len(review.Issues) == 0
 	review.Passed = review.Complete && review.EvidenceMatches && review.Report.Verdict == verify.Verified
+	slices.Sort(review.Issues)
 	return review, nil
 }
