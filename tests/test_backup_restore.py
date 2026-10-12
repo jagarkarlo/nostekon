@@ -274,6 +274,127 @@ def test_v2_plan_loader_revalidates_embedded_rules(tmp_path, monkeypatch):
         restore.load_restore_plan(output)
 
 
+@pytest.fixture
+def semantic_plan(tmp_path, monkeypatch):
+    monkeypatch.setattr(restore, "docker_command", fake_docker([]))
+    backup = tmp_path / "backup.dump"
+    backup.write_bytes(b"PGDMPfixture")
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(validation_profile()))
+    plan = tmp_path / "plan.json"
+    restore.create_restore_plan(backup, plan, validation_profile=profile)
+    return backup, plan
+
+
+@pytest.mark.parametrize("count,passed", [(b"0\n", True), (b"2\n", False)])
+def test_semantic_checks_use_read_only_generated_queries(
+    tmp_path, monkeypatch, semantic_plan, count, passed
+):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands, count=count))
+    backup, plan = semantic_plan
+    run = restore.execute_backup_restore(backup, tmp_path / "run.json", plan=plan)
+    expected = [rule["name"] for rule in validation_profile()["invariants"]]
+    assert run["spec"]["upTo"] == "V4"
+    assert run["spec"]["v4Evidence"] == {"invariants": expected}
+    checks = [check for check in run["status"]["checks"] if check["level"] == "V4"]
+    assert [check["name"] for check in checks] == expected
+    assert all(check["passed"] == passed for check in checks)
+    assert all("measured violations: " in check["detail"] for check in checks)
+    queries = [command for command in commands if "psql" in command and "count(*)" in command[-1]]
+    assert len(queries) == 3
+    for command in queries:
+        assert (
+            "--env=PGOPTIONS=-c default_transaction_read_only=on "
+            "-c statement_timeout=5000 -c lock_timeout=1000" in command
+        )
+    assert queries[0][-1] == 'SELECT count(*) FROM "public"."orders" WHERE "id" IS NULL'
+    assert "HAVING count(*) > 1" in queries[1][-1]
+    assert "NOT EXISTS" in queries[2][-1]
+    assert '"public"."customers"' in queries[2][-1]
+    assert "ledger" not in run["status"]
+    assert commands[-1][0:2] == ["rm", "--force"]
+
+
+@pytest.mark.parametrize("response", [b"NaN", b"-1", b"1\n2", b"9223372036854775808"])
+def test_malformed_invariant_results_fail_without_retaining_output(
+    tmp_path, monkeypatch, semantic_plan, response
+):
+    monkeypatch.setattr(restore, "docker_command", fake_docker([], count=response))
+    backup, plan = semantic_plan
+    run = restore.execute_backup_restore(backup, tmp_path / "run.json", plan=plan)
+    checks = [check for check in run["status"]["checks"] if check["level"] == "V4"]
+    assert len(checks) == 3
+    assert all(not check["passed"] for check in checks)
+    for check, rule in zip(checks, validation_profile()["invariants"], strict=True):
+        assert (
+            check["detail"] == f"{restore._invariant_description(rule)}; query failed; "
+            "no raw database output retained"
+        )
+
+
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("private database output"), subprocess.TimeoutExpired("docker", 1)]
+)
+def test_invariant_query_errors_are_sanitized_and_other_rules_continue(
+    tmp_path, monkeypatch, semantic_plan, failure
+):
+    commands = []
+    delegate = fake_docker(commands, count=b"0\n")
+
+    def execute(arguments, *, timeout):
+        if "psql" in arguments and arguments[-1].endswith('"id" IS NULL'):
+            commands.append(arguments)
+            raise failure
+        return delegate(arguments, timeout=timeout)
+
+    monkeypatch.setattr(restore, "docker_command", execute)
+    backup, plan = semantic_plan
+    run = restore.execute_backup_restore(backup, tmp_path / "run.json", plan=plan)
+    checks = [check for check in run["status"]["checks"] if check["level"] == "V4"]
+    assert [check["passed"] for check in checks] == [False, True, True]
+    assert "private database output" not in json.dumps(run)
+    assert commands[-1][0:2] == ["rm", "--force"]
+
+
+def test_interrupted_invariants_retain_matching_failed_declarations(
+    tmp_path, monkeypatch, semantic_plan
+):
+    commands = []
+    delegate = fake_docker(commands)
+
+    def execute(arguments, *, timeout):
+        if "psql" in arguments and "count(*)" in arguments[-1]:
+            raise KeyboardInterrupt
+        return delegate(arguments, timeout=timeout)
+
+    monkeypatch.setattr(restore, "docker_command", execute)
+    backup, plan = semantic_plan
+    output = tmp_path / "run.json"
+    with pytest.raises(KeyboardInterrupt):
+        restore.execute_backup_restore(backup, output, plan=plan)
+    run = json.loads(output.read_text())
+    names = run["spec"]["v4Evidence"]["invariants"]
+    checks = [check for check in run["status"]["checks"] if check["name"] in names]
+    assert len(checks) == 3
+    assert all(not check["passed"] and "not evaluated" in check["detail"] for check in checks)
+    assert commands[-1][0:2] == ["rm", "--force"]
+
+
+def test_failed_restore_records_all_declared_invariants_as_not_evaluated(
+    tmp_path, monkeypatch, semantic_plan
+):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands, fail_restore=True))
+    backup, plan = semantic_plan
+    run = restore.execute_backup_restore(backup, tmp_path / "run.json", plan=plan)
+    checks = [check for check in run["status"]["checks"] if check["level"] == "V4"]
+    assert len(checks) == 3
+    assert all(not check["passed"] and "not evaluated" in check["detail"] for check in checks)
+    assert not any("psql" in command for command in commands)
+    assert commands[-1][0:2] == ["rm", "--force"]
+
+
 def test_restore_is_isolated_and_reports_only_measured_checks(tmp_path, monkeypatch):
     commands = []
     monkeypatch.setattr(restore, "docker_command", fake_docker(commands))

@@ -270,6 +270,34 @@ def create_restore_plan(
     return plan
 
 
+def _invariant_description(invariant: dict) -> str:
+    description = f"{invariant['type']}: {invariant['table']}.{invariant['column']}"
+    if invariant["type"] == "foreign_key":
+        reference = invariant["reference"]
+        description += f" -> {reference['table']}.{reference['column']}"
+    return description
+
+
+def _invariant_sql(invariant: dict) -> str:
+    table = ".".join(f'"{part}"' for part in invariant["table"].split("."))
+    column = f'"{invariant["column"]}"'
+    if invariant["type"] == "not_null":
+        return f"SELECT count(*) FROM {table} WHERE {column} IS NULL"
+    if invariant["type"] == "unique":
+        return (
+            f"SELECT count(*) FROM (SELECT {column} FROM {table} "
+            f"WHERE {column} IS NOT NULL GROUP BY {column} HAVING count(*) > 1) AS violations"
+        )
+    reference = invariant["reference"]
+    parent = ".".join(f'"{part}"' for part in reference["table"].split("."))
+    parent_column = f'"{reference["column"]}"'
+    return (
+        f"SELECT count(*) FROM {table} AS child WHERE child.{column} IS NOT NULL "
+        f"AND NOT EXISTS (SELECT 1 FROM {parent} AS parent "
+        f"WHERE parent.{parent_column} = child.{column})"
+    )
+
+
 def execute_backup_restore(
     backup: Path, output: Path, *, tables=None, timeout=None, plan: Path | None = None
 ) -> dict:
@@ -285,6 +313,7 @@ def execute_backup_restore(
     elif timeout is None:
         timeout = 300
     tables = _restore_settings(tables, timeout)
+    invariants = restore_plan.get("invariants", []) if restore_plan else []
     checks = []
     phases = []
     name = f"nostekon-backup-{uuid4().hex[:12]}"
@@ -448,6 +477,8 @@ def execute_backup_restore(
                 return (
                     command(
                         "exec",
+                        "--env=PGOPTIONS=-c default_transaction_read_only=on "
+                        "-c statement_timeout=5000 -c lock_timeout=1000",
                         name,
                         "psql",
                         "--no-psqlrc",
@@ -488,6 +519,26 @@ def execute_backup_restore(
                         "passed": measured == expected,
                         "detail": f"expected {expected}; measured {measured}",
                     }
+                )
+            level = "V4"
+            for invariant in invariants:
+                passed = False
+                description = _invariant_description(invariant)
+                detail = f"{description}; query failed; no raw database output retained"
+                try:
+                    raw = phase(
+                        f"Validate {invariant['name']}",
+                        lambda invariant=invariant: query(_invariant_sql(invariant)),
+                    )
+                    if not re.fullmatch(r"[0-9]{1,19}", raw) or int(raw) > 2**63 - 1:
+                        raise ValueError("invariant response was not a bounded nonnegative integer")
+                    measured = int(raw)
+                    passed = measured == 0
+                    detail = f"{description}; measured violations: {measured}; expected 0"
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                    pass
+                checks.append(
+                    {"level": "V4", "name": invariant["name"], "passed": passed, "detail": detail}
                 )
         except (
             OSError,
@@ -540,13 +591,25 @@ def execute_backup_restore(
                             "detail": f"Cleanup failed for {name}; manual removal required",
                         }
                     )
+            evaluated = {check["name"] for check in checks if check["level"] == "V4"}
+            for invariant in invariants:
+                if invariant["name"] not in evaluated:
+                    checks.append(
+                        {
+                            "level": "V4",
+                            "name": invariant["name"],
+                            "passed": False,
+                            "detail": f"{_invariant_description(invariant)}; not evaluated because "
+                            "the rehearsal did not reach validation",
+                        }
+                    )
             result = {
                 "apiVersion": "nostekon/v1alpha1",
                 "kind": "DrillRun",
                 "metadata": {"name": name},
                 "spec": {
                     "scenario": "postgresql-backup-rehearsal",
-                    "upTo": "V3" if tables else "V2",
+                    "upTo": "V4" if invariants else "V3" if tables else "V2",
                 },
                 "status": {
                     "failureAt": started_at,
@@ -555,6 +618,8 @@ def execute_backup_restore(
                     "checks": checks,
                 },
             }
+            if invariants:
+                result["spec"]["v4Evidence"] = {"invariants": [rule["name"] for rule in invariants]}
             with tempfile.NamedTemporaryFile(
                 mode="w", dir=output.parent, prefix=".nostekon-run-", delete=False
             ) as handle:
