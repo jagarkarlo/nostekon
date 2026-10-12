@@ -20,6 +20,55 @@ def test_a_command_is_required() -> None:
     assert exit_info.value.code == 2
 
 
+def test_backup_restore_rejects_duplicate_expectations_before_execution(tmp_path, capsys):
+    assert (
+        main(
+            [
+                "backup",
+                "restore",
+                "--file",
+                str(tmp_path / "missing.dump"),
+                "--output",
+                str(tmp_path / "run.json"),
+                "--expect-table",
+                "public.orders=3",
+                "--expect-table",
+                "public.orders=4",
+            ]
+        )
+        == 2
+    )
+    assert "duplicate" in capsys.readouterr().err
+    assert not (tmp_path / "run.json").exists()
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_backup_restore_cli_exits_match_evidence(tmp_path, monkeypatch, capsys, failed):
+    from nostekon import backup_restore
+
+    captured = []
+
+    def execute(backup, output, **kwargs):
+        captured.append(kwargs)
+        return {"status": {"checks": [{"passed": not failed}]}}
+
+    monkeypatch.setattr(backup_restore, "execute_backup_restore", execute)
+    assert main(
+        [
+            "backup",
+            "restore",
+            "--file",
+            "backup.dump",
+            "--output",
+            str(tmp_path / "run.json"),
+            "--expect-table",
+            "public.orders=3",
+        ]
+    ) == int(failed)
+    assert captured == [{"tables": {"public.orders": 3}, "timeout": 300}]
+    assert "not measured" in capsys.readouterr().out
+
+
 def test_levels_command_lists_all_levels(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["levels"]) == 0
     lines = capsys.readouterr().out.splitlines()

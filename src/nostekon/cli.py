@@ -43,6 +43,47 @@ def _cmd_version(_: argparse.Namespace) -> int:
     return 0
 
 
+def _table_expectation(text: str) -> tuple[str, int]:
+    try:
+        table, count = text.rsplit("=", 1)
+        if not count.isascii() or not count.isdigit():
+            raise ValueError
+        return table, int(count)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("expected schema.table=NONNEGATIVE_COUNT") from error
+
+
+def _cmd_backup_restore(args: argparse.Namespace) -> int:
+    from nostekon.backup_restore import execute_backup_restore
+
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt("backup rehearsal interrupted")
+
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        tables = dict(args.expect_table)
+        if len(tables) != len(args.expect_table):
+            raise ValueError("duplicate table expectations are not allowed")
+        result = execute_backup_restore(
+            Path(args.file), Path(args.output), tables=tables, timeout=args.timeout
+        )
+        print(f"Recorded backup rehearsal in {args.output}")
+        print(
+            "Local backup rehearsal only; incident RTO and acknowledged-write RPO are not measured."
+        )
+        return 0 if all(check["passed"] for check in result["status"]["checks"]) else 1
+    except KeyboardInterrupt:
+        print(
+            "error: rehearsal interrupted; inspect retained evidence and cleanup", file=sys.stderr
+        )
+        return 130
+    except (OSError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _cmd_levels(_: argparse.Namespace) -> int:
     for level, info in LEVELS.items():
         print(f"{level.name}  {info.question:<34}  {info.evidence}")
@@ -288,6 +329,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rpo.add_argument("--json", action="store_true", help="print the report as JSON")
     rpo.set_defaults(handler=_cmd_rpo)
+
+    backup = commands.add_parser("backup", help="test real backup files in a local isolated target")
+    backup_commands = backup.add_subparsers(dest="backup_command", required=True, metavar="ACTION")
+    backup_restore = backup_commands.add_parser(
+        "restore", help="restore a PostgreSQL custom archive; no production connection"
+    )
+    backup_restore.add_argument(
+        "--file", required=True, help="completed pg_dump -Fc archive, <=64 MiB"
+    )
+    backup_restore.add_argument("--output", required=True, help="new private DrillRun JSON file")
+    backup_restore.add_argument(
+        "--expect-table",
+        action="append",
+        default=[],
+        type=_table_expectation,
+        metavar="SCHEMA.TABLE=COUNT",
+        help="up to 20 snapshot-specific row-count expectations",
+    )
+    backup_restore.add_argument("--timeout", type=int, default=300, help="30..1800 seconds")
+    backup_restore.set_defaults(handler=_cmd_backup_restore)
 
     lab = commands.add_parser("lab", help="manage and run disposable k3d lab restore drills")
     lab_commands = lab.add_subparsers(dest="lab_command", required=True, metavar="ACTION")
