@@ -436,6 +436,8 @@ local Docker and a cached trusted `postgres:16.8` image are required:
 nostekon backup plan --file /approved/backups/orders.dump \
   --output plans/orders-plan.json --expect-table public.orders=1250
 python -m json.tool plans/orders-plan.json
+nostekon backup preflight --file /approved/backups/orders.dump \
+  --plan plans/orders-plan.json
 nostekon backup restore --file /approved/backups/orders.dump \
   --plan plans/orders-plan.json --output evidence/orders-rehearsal.run.json
 ```
@@ -445,6 +447,12 @@ image, expectations and timeout. Review the plan first; execution rejects change
 backups and setting overrides. Plans are not signed approvals or proof of identity.
 Use an expected count from the same snapshot. Input is bounded to 64 MiB;
 database storage to 512 MiB. Requested depth is V2 without counts or V3 with them.
+
+`backup preflight` checks bound bytes, declared counts and local daemon/pinned-image
+metadata without starting a target. Stop on any nonzero exit. A pass is not approval,
+archive validity, available capacity or restore evidence; obtain owner approval and
+use a dedicated host before executing. The guide includes a first-pilot checklist.
+
 Add `--validation-profile ./profiles/orders-profile.json` during planning for V4:
 strict, bound null/uniqueness/reference rules evaluated with generated read-only
 queries. At least one snapshot-specific count is required; passing proves only

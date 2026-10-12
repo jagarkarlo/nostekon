@@ -69,7 +69,49 @@ fields with the backup owner, confirm the count against that snapshot and follow
 your normal data-handling and image-approval process. Protect the plan alongside
 the approved archive, outside the source repository.
 
-Then execute exactly those settings:
+### Check local technical prerequisites
+
+Before executing the reviewed plan, run the metadata-only preflight on the
+**dedicated restore host**, using the same Linux account that will run the restore:
+
+```bash
+umask 077
+set -o noclobber
+nostekon backup preflight \
+  --file /approved/backups/orders.dump \
+  --plan ./plans/orders-plan.json \
+  > ./evidence/orders-preflight.json
+```
+
+Create the protected evidence directory first and choose a new output filename.
+The command emits `PostgreSQLBackupPreflight` JSON with named checks, the canonical
+plan fingerprint, observed archive digest/size, pinned image ID and limitations.
+It freezes a bounded private temporary copy, then deletes that copy. Source and
+plan are unchanged. Byte drift returns a blocked result **before any Docker query**.
+
+The only Docker operations are local daemon information and inspection of the
+exact cached image ID. They share a 30-second metadata deadline. The check requires
+a Linux daemon on native amd64/arm64, a matching Linux image, at least 512 MiB and
+one CPU advertised by the daemon, and at least one declared snapshot count. It
+never pulls an image, creates/starts/executes/removes a container, queries a
+database, connects to production or writes a recovery checkpoint. Raw daemon
+errors and host metadata are not included in the result.
+
+Exit `0` means **these technical prerequisites passed**, `1` means valid inputs
+with blocked prerequisites, `2` means invalid/unreadable inputs or output failure,
+and `130` means interruption. A redirect may leave an empty/partial file on error;
+check the exit status, not just file existence. On any nonzero exit, stop, resolve
+the cause and rerun using a fresh output filename. Do not bypass a missing image
+or edit the plan to fit a different backup.
+
+Preflight does not validate the complete archive, measure available memory/disk,
+verify source version/extensions, prove counts accurate, execute semantic checks
+or authorize data handling. `requestedLevel` is the plan's requested depth, **not
+an achieved recovery verdict**. Even an intentionally wrong count can pass
+preflight. The restore and independent gate must still measure and review it.
+
+After passing preflight **and obtaining the approvals below**, execute exactly
+the reviewed settings:
 
 ```bash
 nostekon backup restore \
@@ -424,6 +466,51 @@ Investigate a count mismatch; do not lower expectations until the report turns
 green. The review is cleanup state only, not restore evidence or an RTO/RPO result.
 
 ## Production-readiness gates
+
+### First production-origin pilot checklist
+
+The local workflow is implemented; an actual production-origin pilot still needs
+an approved asset, owner and dedicated execution host. No production-origin backup
+has been used in the verification described here. A file named `approved.dump`, a
+checksum or a passing preflight is not an approval record.
+
+1. **Backup owner:** record approval to copy/process one completed, sanitized
+  custom-format backup, its snapshot time, source server version and required
+  extensions. Confirm it contains no prohibited data and fits the 64 MiB limit.
+  Do not obtain production credentials or export source data as part of this runbook.
+2. **Restore-host operator:** approve a dedicated Linux host and trusted cached
+  compatible image. Assess expanded database size against the 512 MiB limit,
+  currently free RAM/disk, temp-copy storage and workload isolation. Docker's total
+  advertised memory is not available capacity; this is not a shared-daemon service.
+3. **Coverage owner:** supply counts from that exact snapshot and review the selected
+  semantic rules and omitted business checks. Keep this approval outside the
+  unsigned plan/bundle. Do not lower a count or remove a rule just to obtain a pass.
+4. **Evidence handling:** use a fresh private output directory on that host, choose
+  an owner and retention period for the archive, plan, capture, preflight, review
+  and any recovery snapshot. Do not upload production-origin assets to CI or commit
+  them to Git. Bundles omit dumps but still contain schema names, counts and results.
+5. **Admission:** generate the plan on the host, review it with the owners, then run
+  the preflight above. Resolve every failed check; independently confirm the
+  approvals, source compatibility and capacity that the command cannot establish.
+6. **Execution:** run one plan-bound restore into the isolated target. Record the
+  exit status and inspect restore, health, count/rule and cleanup observations.
+  Exit `1` is failed evidence, not permission to weaken the plan. Exit `2`/`130`
+  requires checking the output and recovery state before any new attempt.
+7. **Independent review:** use the original plan/capture with the Go gate or Studio
+  Plan review above. Require passing, complete, matching evidence and successful
+  cleanup for pilot acceptance. Preserve honest failed evidence and investigate
+  mismatches. Export a bundle only under the agreed data-handling policy.
+8. **Closeout:** verify exact-target cleanup and private snapshot removal. After a
+  hard stop, follow read-only recovery inspection and separately authorized,
+  quiescent exact-target cleanup above. Have the owners accept the measured scope,
+  limitations and retention decision; do not report RTO/RPO or production readiness
+  from this isolated restore alone.
+
+If any owner, approved backup, snapshot facts, compatible image or host is missing,
+the pilot remains blocked. Synthetic test success is not a substitute. The evidence
+viewer remains usable for offline plan/bundle review without any execution access.
+
+### Direct Integration Boundary
 
 **Available now:** local isolated rehearsals of approved PostgreSQL backup files.
 **Next pilot:** one sanitized production-origin backup, matching server/extensions,
