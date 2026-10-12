@@ -200,9 +200,20 @@ def create_restore_plan(backup: Path, output: Path, *, tables=None, timeout=300)
     return plan
 
 
-def execute_backup_restore(backup: Path, output: Path, *, tables=None, timeout=300) -> dict:
+def execute_backup_restore(
+    backup: Path, output: Path, *, tables=None, timeout=None, plan: Path | None = None
+) -> dict:
     if sys.platform != "linux":
         raise ValueError("backup rehearsal currently requires Linux and a local Docker daemon")
+    restore_plan = None
+    if plan is not None:
+        if tables is not None or timeout is not None:
+            raise ValueError("cannot override table expectations or timeout from a restore plan")
+        restore_plan = load_restore_plan(plan)
+        tables = restore_plan["tables"]
+        timeout = restore_plan["timeoutSeconds"]
+    elif timeout is None:
+        timeout = 300
     tables = _restore_settings(tables, timeout)
     checks = []
     phases = []
@@ -230,12 +241,17 @@ def execute_backup_restore(backup: Path, output: Path, *, tables=None, timeout=3
         snapshot = snapshot_backup(backup, Path(directory))
         if "," in str(snapshot):
             raise ValueError("backup workspace path cannot contain Docker mount separators")
+        with snapshot.open("rb") as original:
+            digest = hashlib.file_digest(original, "sha256").hexdigest()
+        if restore_plan is not None and restore_plan["backup"] != {
+            "sha256": digest,
+            "bytes": snapshot.stat().st_size,
+        }:
+            raise ValueError("backup does not match the restore plan checksum and size")
         output.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.close(descriptor)
         try:
-            with snapshot.open("rb") as original:
-                digest = hashlib.file_digest(original, "sha256").hexdigest()
             checks.append(
                 {
                     "level": "V0",
@@ -244,11 +260,14 @@ def execute_backup_restore(backup: Path, output: Path, *, tables=None, timeout=3
                     "detail": f"SHA-256 {digest}; {snapshot.stat().st_size} bytes",
                 }
             )
+            image_reference = restore_plan["imageId"] if restore_plan else "postgres:16.8"
             image = (
-                command("image", "inspect", "--format={{.Id}}", "postgres:16.8").decode().strip()
+                command("image", "inspect", "--format={{.Id}}", image_reference).decode().strip()
             )
             if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
                 raise ValueError("local PostgreSQL image must have a valid immutable image ID")
+            if restore_plan is not None and image != restore_plan["imageId"]:
+                raise ValueError("local PostgreSQL image does not match the restore plan")
             checks.append(
                 {
                     "level": "V0",
@@ -257,6 +276,19 @@ def execute_backup_restore(backup: Path, output: Path, *, tables=None, timeout=3
                     "detail": image,
                 }
             )
+            if restore_plan is not None:
+                identity = hashlib.sha256(
+                    json.dumps(restore_plan, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                checks.append(
+                    {
+                        "level": "V0",
+                        "name": "Restore plan binding",
+                        "passed": True,
+                        "detail": f"Canonical plan SHA-256 {identity}; backup and image matched; "
+                        "not operator approval or authenticated provenance",
+                    }
+                )
             attempted = True
             phase(
                 "Create isolated target",

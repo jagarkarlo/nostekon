@@ -185,6 +185,83 @@ def test_restore_is_isolated_and_reports_only_measured_checks(tmp_path, monkeypa
     assert source.read_bytes() == b"PGDMP" + b"fixture" * 3
 
 
+def test_planned_restore_uses_bound_image_counts_and_records_plan_digest(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    backup = tmp_path / "backup.dump"
+    backup.write_bytes(b"PGDMPfixture")
+    plan_path = tmp_path / "plan.json"
+    plan = restore.create_restore_plan(backup, plan_path, tables={"public.orders": 3}, timeout=90)
+    commands.clear()
+    run = restore.execute_backup_restore(backup, tmp_path / "run.json", plan=plan_path)
+    image_id = "sha256:" + "a" * 64
+    assert commands[0] == ["image", "inspect", "--format={{.Id}}", image_id]
+    create = next(command for command in commands if command[0] == "create")
+    assert image_id in create and "postgres:16.8" not in create
+    assert any(check["name"] == "Row count: public.orders" for check in run["status"]["checks"])
+    identity = hashlib.sha256(
+        json.dumps(plan, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    binding = next(
+        check for check in run["status"]["checks"] if check["name"] == "Restore plan binding"
+    )
+    assert binding["passed"] and identity in binding["detail"]
+    assert all(check["passed"] for check in run["status"]["checks"])
+    assert run["spec"]["upTo"] == "V3"
+    assert plan_path.read_bytes() and "ledger" not in run["status"]
+
+
+@pytest.mark.parametrize("change", ["same_size", "size", "plan_size"])
+def test_planned_backup_mismatch_rejects_before_commands_and_output(tmp_path, monkeypatch, change):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    backup = tmp_path / "backup.dump"
+    backup.write_bytes(b"PGDMPfixture")
+    plan_path = tmp_path / "plan.json"
+    plan = restore.create_restore_plan(backup, plan_path)
+    if change == "same_size":
+        backup.write_bytes(b"PGDMPchanged")
+    elif change == "size":
+        backup.write_bytes(b"PGDMPdifferent size")
+    else:
+        plan["backup"]["bytes"] += 1
+        plan_path.write_text(json.dumps(plan))
+    commands.clear()
+    output = tmp_path / "not-created" / "run.json"
+    with pytest.raises(ValueError, match="does not match"):
+        restore.execute_backup_restore(backup, output, plan=plan_path)
+    assert not commands and not output.parent.exists()
+
+
+@pytest.mark.parametrize("override", [{"tables": {}}, {"timeout": 300}])
+def test_planned_settings_cannot_be_overridden(tmp_path, monkeypatch, override):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    with pytest.raises(ValueError, match="override"):
+        restore.execute_backup_restore(
+            tmp_path / "missing.dump",
+            tmp_path / "run.json",
+            plan=tmp_path / "plan.json",
+            **override,
+        )
+    assert not commands and not (tmp_path / "run.json").exists()
+
+
+def test_planned_image_mismatch_never_creates_a_target(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    backup = tmp_path / "backup.dump"
+    backup.write_bytes(b"PGDMPfixture")
+    plan_path = tmp_path / "plan.json"
+    plan = restore.create_restore_plan(backup, plan_path)
+    plan["imageId"] = "sha256:" + "b" * 64
+    plan_path.write_text(json.dumps(plan))
+    commands.clear()
+    result = restore.execute_backup_restore(backup, tmp_path / "run.json", plan=plan_path)
+    assert len(commands) == 1 and commands[0][-1] == plan["imageId"]
+    assert any(not check["passed"] for check in result["status"]["checks"])
+
+
 @pytest.mark.parametrize("failure", ["restore", "mismatch", "bad_count", "cleanup"])
 def test_restore_failure_never_becomes_a_passing_run(tmp_path, monkeypatch, failure):
     commands = []
