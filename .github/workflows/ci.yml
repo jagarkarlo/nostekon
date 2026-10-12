@@ -101,7 +101,7 @@ jobs:
         working-directory: studio
         env:
           NOSTEKON_APP_URL: http://127.0.0.1:8180
-        run: npm run test:e2e -- --grep 'installed app|portable evidence bundle|suite review gate|suite history|signature trust|app information|run backup|real backup rehearsal'
+        run: npm run test:e2e -- --grep 'installed app|portable evidence bundle|suite review gate|suite history|signature trust|app information|run backup|real backup rehearsal|real semantic backup'
       - name: Stop app
         if: always()
         run: docker compose down
