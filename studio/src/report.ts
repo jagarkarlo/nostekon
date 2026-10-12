@@ -148,6 +148,7 @@ const statusMark: Record<LevelStatus, string> = { passed: "PASS", failed: "FAIL"
 
 /** A Markdown evidence summary suitable for a change record or audit trail. */
 export function reportMarkdown(report: Report): string {
+  const rehearsal = report.scenario === "postgresql-backup-rehearsal";
   const offsetLabel = (seconds: number): string => {
     const offset = Math.round(seconds);
     return offset < 0 ? `−${formatDuration(-offset)}` : `+${formatDuration(offset)}`;
@@ -158,13 +159,13 @@ export function reportMarkdown(report: Report): string {
     `**Verdict:** ${report.verdict.toUpperCase()}. ${report.headline}.`,
     "",
     `- Drill: ${report.drill || "—"} (${report.scenario || "unspecified scenario"})`,
-    `- Failure injected: ${report.failureAt}`,
+    `- ${rehearsal ? "Rehearsal started" : "Failure injected"}: ${report.failureAt}`,
     `- Requested depth: ${report.requestedLevel}; deepest passed: ${report.deepestPassed ?? "none"}; first failed: ${report.firstFailed ?? "none"}`,
     `- Evidence provenance: ${report.provenance?.status ?? "unverified"}${report.provenance?.keyId ? ` (${report.provenance.keyId})` : ""}`,
   ];
   if (report.rto) {
     const objective = report.rto.objectiveSeconds === null ? "no objective" : `objective ${formatDuration(report.rto.objectiveSeconds)}`;
-    lines.push(`- RTO: ${formatDuration(report.rto.seconds)} (${objective}); slowest phase ${report.rto.slowestPhase}`);
+    lines.push(`- ${rehearsal ? "Rehearsal duration" : "RTO"}: ${formatDuration(report.rto.seconds)} (${objective}); slowest phase ${report.rto.slowestPhase}`);
   }
   if (report.rpo) {
     const objective = report.rpo.objectiveSeconds === null ? "no objective" : `objective ${formatDuration(report.rpo.objectiveSeconds)}`;

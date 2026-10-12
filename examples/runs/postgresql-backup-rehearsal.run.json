@@ -1,0 +1,85 @@
+{
+  "apiVersion": "nostekon/v1alpha1",
+  "kind": "DrillRun",
+  "metadata": {
+    "name": "nostekon-backup-45dc6487b3d0"
+  },
+  "spec": {
+    "scenario": "postgresql-backup-rehearsal",
+    "upTo": "V3"
+  },
+  "status": {
+    "failureAt": "2026-10-12T06:40:11.572546Z",
+    "completedAt": "2026-10-12T06:40:13.543414Z",
+    "phases": [
+      {
+        "name": "Create isolated target",
+        "startedAt": "2026-10-12T06:40:11.598365Z",
+        "endedAt": "2026-10-12T06:40:11.673616Z"
+      },
+      {
+        "name": "Start PostgreSQL",
+        "startedAt": "2026-10-12T06:40:11.820024Z",
+        "endedAt": "2026-10-12T06:40:12.927716Z"
+      },
+      {
+        "name": "Restore custom archive",
+        "startedAt": "2026-10-12T06:40:12.927762Z",
+        "endedAt": "2026-10-12T06:40:13.071963Z"
+      },
+      {
+        "name": "Database query",
+        "startedAt": "2026-10-12T06:40:13.072003Z",
+        "endedAt": "2026-10-12T06:40:13.223059Z"
+      },
+      {
+        "name": "Count public.orders",
+        "startedAt": "2026-10-12T06:40:13.223118Z",
+        "endedAt": "2026-10-12T06:40:13.392433Z"
+      },
+      {
+        "name": "Remove isolated target",
+        "startedAt": "2026-10-12T06:40:13.392717Z",
+        "endedAt": "2026-10-12T06:40:13.543369Z"
+      }
+    ],
+    "checks": [
+      {
+        "level": "V0",
+        "name": "Frozen custom archive",
+        "passed": true,
+        "detail": "SHA-256 23484c1b0de2d8d7411fe030863918c1e8819da3b583fde816adcb25c2eb5071; 1587 bytes"
+      },
+      {
+        "level": "V0",
+        "name": "Pinned local PostgreSQL image",
+        "passed": true,
+        "detail": "sha256:2698c2096ca78a41ae7477580afb30fe36d5368564511b2ea593dbfb26401fdd"
+      },
+      {
+        "level": "V1",
+        "name": "Archive restore completed",
+        "passed": true,
+        "detail": "pg_restore --exit-on-error --single-transaction"
+      },
+      {
+        "level": "V2",
+        "name": "Restored database query",
+        "passed": true,
+        "detail": "SELECT 1 returned 1; not an application-health proof"
+      },
+      {
+        "level": "V3",
+        "name": "Row count: public.orders",
+        "passed": true,
+        "detail": "expected 3; measured 3"
+      },
+      {
+        "level": "V2",
+        "name": "Isolated target removed",
+        "passed": true,
+        "detail": "nostekon-backup-45dc6487b3d0"
+      }
+    ]
+  }
+}

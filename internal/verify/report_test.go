@@ -51,6 +51,18 @@ func TestVerifiedRunReachesRequestedLevel(t *testing.T) {
 	}
 }
 
+func TestBackupRehearsalReportsItsLimitedScope(t *testing.T) {
+	evidence := loadRun(t, "k3d-postgresql.run.json")
+	evidence.Spec.Scenario = "postgresql-backup-rehearsal"
+	report := Build(evidence)
+	for _, finding := range report.Findings {
+		if strings.Contains(finding.Message, "not incident RTO") {
+			return
+		}
+	}
+	t.Fatal("backup rehearsal must disclose its timing and application scope")
+}
+
 func TestRecordedLabLedgerPolicies(t *testing.T) {
 	cases := []struct {
 		name    string

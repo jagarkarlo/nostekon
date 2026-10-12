@@ -1,6 +1,7 @@
 const sources = import.meta.glob<string>("../../examples/runs/*.run.json", { query: "?raw", import: "default" });
 const info: Record<string, { label: string; summary: string; recorded: boolean }> = {
   "k3d-postgresql": { label: "Isolated PostgreSQL restore", summary: "Recorded lab / two clusters / V3", recorded: true },
+  "postgresql-backup-rehearsal": { label: "PostgreSQL backup rehearsal", summary: "Recorded lab / custom backup / V3", recorded: true },
   "k3d-ledger-zero-loss": { label: "PostgreSQL zero loss", summary: "Recorded lab / 10 writes recovered / V4", recorded: true },
   "k3d-ledger-tail-loss": { label: "PostgreSQL RPO exceeded", summary: "Recorded lab / 2 writes lost / 0s budget", recorded: true },
   "k3d-ledger-budget-loss": { label: "PostgreSQL loss within budget", summary: "Recorded lab / 2 writes lost / 60s budget", recorded: true },

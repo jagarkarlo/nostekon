@@ -35,6 +35,13 @@ const report: Report = {
 };
 
 describe("signed-original archive import", () => {
+  it("labels backup rehearsal timing without inventing a failure or incident RTO", () => {
+    const markdown = reportMarkdown({ ...report, scenario: "postgresql-backup-rehearsal" });
+    expect(markdown).toContain("Rehearsal started:");
+    expect(markdown).toContain("Rehearsal duration:");
+    expect(markdown).not.toContain("Failure injected:");
+    expect(markdown).not.toContain("- RTO:");
+  });
   const encode = (text: string) => new TextEncoder().encode(text);
   function archiveEntries(entries: [string, Uint8Array][]) {
     const chunks: Uint8Array[] = [];

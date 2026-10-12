@@ -216,7 +216,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
         {sampleId && (
           <div className="sample-caveat">
             <AlertTriangle size={14} />
-            <p><strong>{recordedSample ? "Recorded local lab run" : "Illustrative evidence"}</strong>{recordedSample ? "This file came from a disposable two-cluster PostgreSQL restore. It is runner-reported, not cryptographically attested or production data." : "These traces are synthetic examples. They are not recorded from a real restore or production cluster."}</p>
+            <p><strong>{recordedSample ? "Recorded local lab run" : "Illustrative evidence"}</strong>{recordedSample ? "This file came from a disposable local PostgreSQL restore. It is runner-reported, not cryptographically attested or production data." : "These traces are synthetic examples. They are not recorded from a real restore or production cluster."}</p>
           </div>
         )}
         <input
@@ -358,6 +358,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
 }
 
 function ReportBody({ report, onCopy, copied }: { report: Report; onCopy: () => void; copied: boolean }) {
+  const rehearsal = report.scenario === "postgresql-backup-rehearsal";
   const initial = report.firstFailed ?? report.deepestPassed ?? "V0";
   const [selected, setSelected] = useState(initial);
   useEffect(() => setSelected(initial), [initial, report]);
@@ -394,8 +395,9 @@ function ReportBody({ report, onCopy, copied }: { report: Report; onCopy: () => 
         </div>
       </section>
 
+      {rehearsal && <div className="banner" role="status" aria-label="Backup rehearsal scope">Backup rehearsal timing, not incident RTO. Row counts do not prove application consistency or production readiness.</div>}
       <div className="metrics">
-        <Metric label="Recovery time" value={formatDuration(report.rto?.seconds)} objective={report.rto?.objectiveSeconds ?? null} measured={report.rto?.seconds ?? null} met={report.rto?.met ?? null} />
+        <Metric label={rehearsal ? "Rehearsal duration" : "Recovery time"} value={formatDuration(report.rto?.seconds)} objective={report.rto?.objectiveSeconds ?? null} measured={report.rto?.seconds ?? null} met={report.rto?.met ?? null} />
         <Metric label="Data loss window" value={report.rpo ? formatDuration(report.rpo.seconds) : "—"} objective={report.rpo?.objectiveSeconds ?? null} measured={report.rpo?.seconds ?? null} met={report.rpo?.met ?? null} />
         <div className="metric">
           <span className="metric-label">Writes lost</span>
@@ -431,7 +433,7 @@ function ReportBody({ report, onCopy, copied }: { report: Report; onCopy: () => 
         <LevelDetail level={level} />
       </section>
 
-      {report.rto && <PhaseTimeline rto={report.rto} />}
+      {report.rto && <PhaseTimeline rto={report.rto} rehearsal={rehearsal} />}
       {report.rpo && <LedgerChart rpo={report.rpo} failureAt={report.failureAt} />}
 
       {report.findings.length > 0 && (
@@ -496,21 +498,21 @@ function LevelDetail({ level }: { level: LevelResult }) {
   );
 }
 
-function PhaseTimeline({ rto }: { rto: RTOResult }) {
+function PhaseTimeline({ rto, rehearsal = false }: { rto: RTOResult; rehearsal?: boolean }) {
   const { bars, scaleSeconds, objectiveAt, failureAt, failureOffsetSeconds } = timelineBars(rto);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((share) => {
     const offset = share * scaleSeconds - failureOffsetSeconds;
-    return { share, label: offset < 0 ? `−${formatDuration(-offset)}` : offset === 0 ? "failure" : `+${formatDuration(offset)}` };
+    return { share, label: offset < 0 ? `−${formatDuration(-offset)}` : offset === 0 ? rehearsal ? "start" : "failure" : `+${formatDuration(offset)}` };
   });
   return (
     <section className="panel">
       <header className="panel-head">
-        <h3>Recovery timeline</h3>
-        <span className="card-sub">{formatDuration(rto.seconds)} after failure{rto.uncoveredSeconds >= 1 ? ` · ${formatDuration(rto.uncoveredSeconds)} unaccounted` : ""}</span>
+        <h3>{rehearsal ? "Rehearsal timeline" : "Recovery timeline"}</h3>
+        <span className="card-sub">{formatDuration(rto.seconds)} {rehearsal ? "from rehearsal start" : "after failure"}{rto.uncoveredSeconds >= 1 ? ` · ${formatDuration(rto.uncoveredSeconds)} unaccounted` : ""}</span>
       </header>
       <div className="timeline">
         {failureOffsetSeconds > 0 && (
-          <div className="failure-line" title="Failure injected" style={{ left: `calc(var(--label-w) + (100% - var(--label-w)) * ${failureAt / 100})` }} />
+          <div className="failure-line" title={rehearsal ? "Rehearsal started" : "Failure injected"} style={{ left: `calc(var(--label-w) + (100% - var(--label-w)) * ${failureAt / 100})` }} />
         )}
         {objectiveAt !== null && (
           <div

@@ -118,6 +118,9 @@ func Build(evidence *Evidence) Report {
 	finding := func(severity, format string, args ...any) {
 		report.Findings = append(report.Findings, Finding{severity, fmt.Sprintf(format, args...)})
 	}
+	if evidence.Spec.Scenario == "postgresql-backup-rehearsal" {
+		finding("warning", "backup rehearsal duration is not incident RTO; selected row counts do not prove application consistency or production readiness")
+	}
 
 	checks := make([][]CheckResult, len(Levels))
 	ledgerV4Passed := true

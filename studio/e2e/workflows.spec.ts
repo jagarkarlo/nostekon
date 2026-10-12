@@ -312,6 +312,39 @@ for (const width of [390, 1440]) {
     await expect(dialog).not.toBeVisible();
   });
 
+  test(`real backup rehearsal preserves limited scope and exact originals at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(process.env.NOSTEKON_APP_URL ? "/#/report" : "/demo/#/report");
+    await page.getByRole("button", { name: /^PostgreSQL backup rehearsal/ }).click();
+    await expect(page.getByRole("status", { name: "Backup rehearsal scope" })).toContainText("not incident RTO");
+    await expect(page.locator(".sample-caveat")).toContainText("disposable local PostgreSQL restore");
+    await expect(page.locator(".sample-caveat")).not.toContainText("two-cluster");
+    await page.goto(process.env.NOSTEKON_APP_URL ? "/#/runs" : "/demo/#/runs");
+    const original = await readFile(new URL("../../examples/runs/postgresql-backup-rehearsal.run.json", import.meta.url));
+    await page.getByTestId("run-evidence-input").setInputFiles({ name: "backup-rehearsal.json", mimeType: "application/json", buffer: original });
+    await expect(page.getByRole("heading", { name: "Verified to V3" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Backup rehearsal scope" })).toContainText("not incident RTO");
+    await expect(page.locator(".metric-label", { hasText: "Rehearsal duration" })).toBeVisible();
+    await expect(page.locator(".metric-sub", { hasText: "no write ledger" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Evidence provenance" })).toContainText("unverified");
+    const markdownDownload = page.waitForEvent("download");
+    await page.getByTitle("Download the evidence summary as Markdown", { exact: true }).click();
+    const markdown = await readFile((await (await markdownDownload).path())!, "utf8");
+    expect(markdown).toContain("Rehearsal duration:");
+    expect(markdown).not.toContain("Failure injected:");
+    await page.getByRole("button", { name: "Save run", exact: true }).click();
+    await page.getByRole("link", { name: "Runs", exact: true }).click();
+    const name = JSON.parse(original.toString()).metadata.name as string;
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(1);
+    const originalDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: `Download evidence for ${name}`, exact: true }).click();
+    expect(await readFile((await (await originalDownload).path())!)).toEqual(original);
+    await page.getByRole("button", { name, exact: true }).click();
+    await expect(page.getByRole("status", { name: "Backup rehearsal scope" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`backup-rehearsal-${width}.png`), fullPage: true });
+  });
+
   test(`download page distinguishes real local artifacts from unpublished releases at ${width}px`, async ({ page }, testInfo) => {
     test.skip(!!process.env.NOSTEKON_APP_URL, "product route belongs to the static site");
     await page.setViewportSize({ width, height: 900 });
@@ -1112,7 +1145,7 @@ for (const width of [390, 1440]) {
     test(`recorded ledger ${sample.label} at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/demo/");
-      await expect(page.locator(".sample-section")).toContainText("4 recorded lab · 2 synthetic");
+      await expect(page.locator(".sample-section")).toContainText("5 recorded lab · 2 synthetic");
       await page.getByRole("button", { name: new RegExp(sample.label) }).click();
       await expect(page.getByRole("heading", { name: sample.heading })).toBeVisible();
       await expect(page.locator(".sample-caveat")).toContainText("Recorded local lab run");
