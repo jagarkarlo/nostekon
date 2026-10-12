@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import selectors
 import shutil
 import stat
 import subprocess
@@ -332,6 +333,28 @@ def test_recovery_inspection_is_read_only_and_confirmed_cleanup_is_idempotent(
     again = recovery.recover_backup(directory, confirm_cleanup=True)
     assert again["containerRemoved"] is False
     assert not any(command[0] == "rm" for command in commands)
+
+
+def test_recovery_journal_rejects_identity_changes_and_state_regression(tmp_path):
+    directory = tmp_path / "attempt.recovery"
+    with RecoveryJournal.create(
+        directory, run_id="a" * 32, image_id="sha256:" + "b" * 64
+    ) as journal:
+        journal.update("running", container_id="c" * 64)
+        before = (directory / "recovery.json").read_bytes()
+        with pytest.raises(ValueError, match="container identity"):
+            journal.update("cleanup-required", container_id="d" * 64)
+        with pytest.raises(ValueError, match="transition"):
+            journal.update("prepared")
+        assert (directory / "recovery.json").read_bytes() == before
+        journal.update("cleanup-required")
+        with pytest.raises(ValueError, match="transition"):
+            journal.update("running")
+        journal.update("cleaned")
+        before = (directory / "recovery.json").read_bytes()
+        with pytest.raises(ValueError, match="transition"):
+            journal.update("cleanup-required")
+        assert (directory / "recovery.json").read_bytes() == before
 
 
 def test_recovery_of_active_runner_does_not_call_docker(tmp_path, monkeypatch):
@@ -1055,6 +1078,76 @@ def test_symlink_and_fifo_are_rejected_without_reading(tmp_path):
         with pytest.raises((OSError, ValueError)):
             restore.snapshot_backup(path, workspace)
     assert list(workspace.iterdir()) == []
+
+
+@pytest.mark.parametrize("boundary", ["create", "start"])
+@pytest.mark.skipif(
+    os.environ.get("NOSTEKON_BACKUP_INTEGRATION") != "1",
+    reason="explicit local Docker backup integration opt-in",
+)
+def test_real_sigkill_recovery_preserves_evidence_and_source(tmp_path, boundary):
+    archive = tmp_path / "boundary.dump"
+    archive.write_bytes(b"PGDMP" + b"synthetic crash-boundary payload")
+    original = archive.read_bytes()
+    output = tmp_path / "interrupted.json"
+    directory = output.with_name(output.name + ".recovery")
+    worker_temp = tmp_path / "worker-temp"
+    worker_temp.mkdir(mode=0o700)
+    script = """
+import sys
+from pathlib import Path
+from nostekon import backup_restore
+command = backup_restore.docker_command
+def stop_at_boundary(arguments, *, timeout):
+    result = command(arguments, timeout=timeout)
+    if arguments[0] == sys.argv[3]:
+        print("boundary reached", flush=True)
+        sys.stdin.readline()
+    return result
+backup_restore.docker_command = stop_at_boundary
+backup_restore.execute_backup_restore(Path(sys.argv[1]), Path(sys.argv[2]))
+"""
+    child = subprocess.Popen(
+        [sys.executable, "-u", "-c", script, str(archive), str(output), boundary],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**os.environ, "TMPDIR": str(worker_temp)},
+    )
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(child.stdout, selectors.EVENT_READ)
+            assert selector.select(45), "runner did not reach its controlled Docker boundary"
+        assert child.stdout.readline() == b"boundary reached\n"
+        checkpoint = json.loads((directory / "recovery.json").read_text())
+        assert checkpoint["status"] == ("prepared" if boundary == "create" else "running")
+        assert (checkpoint["containerId"] is None) == (boundary == "create")
+        with pytest.raises(ValueError, match="active"):
+            recovery.recover_backup(directory, confirm_cleanup=True)
+        child.kill()
+        _, errors = child.communicate(timeout=10)
+        assert child.returncode == -9, errors.decode(errors="replace")
+        assert output.read_bytes() == b""
+        assert (directory / "backup.dump").read_bytes() == original
+        before = (directory / "recovery.json").read_bytes()
+        reviewed = recovery.recover_backup(directory)
+        assert reviewed["containerPresent"] and reviewed["snapshotPresent"]
+        assert not reviewed["cleanupConfirmed"] and not reviewed["containerRemoved"]
+        assert (directory / "recovery.json").read_bytes() == before
+        cleaned = recovery.recover_backup(directory, confirm_cleanup=True)
+        assert cleaned["checkpointStatus"] == "cleaned"
+        assert cleaned["containerRemoved"] and not cleaned["containerPresent"]
+        assert not cleaned["snapshotPresent"]
+        assert cleaned["containerId"] == reviewed["observedContainerId"]
+        repeated = recovery.recover_backup(directory, confirm_cleanup=True)
+        assert repeated["checkpointStatus"] == "cleaned" and not repeated["containerRemoved"]
+        assert archive.read_bytes() == original and output.read_bytes() == b""
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.communicate(timeout=10)
+        if directory.exists():
+            recovery.recover_backup(directory, confirm_cleanup=True)
 
 
 @pytest.mark.skipif(

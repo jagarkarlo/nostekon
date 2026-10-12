@@ -172,6 +172,16 @@ class RecoveryJournal:
                 os.unlink(temporary, dir_fd=self._descriptor)
 
     def update(self, status: str, *, container_id: str | None = None) -> None:
+        transitions = {
+            "prepared": {"prepared", "running", "cleanup-required"},
+            "running": {"running", "cleanup-required"},
+            "cleanup-required": {"cleanup-required", "cleaned"},
+            "cleaned": {"cleaned"},
+        }
+        if status not in transitions[self.record["status"]]:
+            raise ValueError("invalid recovery checkpoint state transition")
+        if container_id is not None and self.record["containerId"] not in (None, container_id):
+            raise ValueError("cannot change recorded recovery container identity")
         record = {**self.record, "status": status}
         if container_id is not None:
             record["containerId"] = container_id
