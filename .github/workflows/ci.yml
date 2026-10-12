@@ -51,6 +51,26 @@ jobs:
       - name: Validate example drills
         run: nostekon validate examples/drills/*.yaml
 
+  backup-rehearsal:
+    name: Real PostgreSQL backup rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Cache explicit test image
+        run: docker --host unix:///var/run/docker.sock pull postgres:16.8
+      - name: Exercise real dump, isolated restore and independent verdicts
+        env:
+          NOSTEKON_BACKUP_INTEGRATION: '1'
+        run: pytest -q tests/test_backup_restore.py
+
   app:
     name: Installed app
     runs-on: ubuntu-latest
@@ -81,7 +101,7 @@ jobs:
         working-directory: studio
         env:
           NOSTEKON_APP_URL: http://127.0.0.1:8180
-        run: npm run test:e2e -- --grep 'installed app|portable evidence bundle|suite review gate|suite history|signature trust|app information|run backup'
+        run: npm run test:e2e -- --grep 'installed app|portable evidence bundle|suite review gate|suite history|signature trust|app information|run backup|real backup rehearsal'
       - name: Stop app
         if: always()
         run: docker compose down
