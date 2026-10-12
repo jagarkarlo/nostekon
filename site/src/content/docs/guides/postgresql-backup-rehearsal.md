@@ -6,8 +6,9 @@ an approved production-origin backup can be tested without production
 credentials, contacting the source, or deleting a source namespace.
 
 Verified locally on 2026-10-12 with PostgreSQL 16.8, a real `pg_dump -Fc`,
-three restored rows, an intentionally wrong count, independent Go evaluation,
-and cleanup. No production backup was used in that test.
+three restored rows, an intentionally wrong count, bound restore plans,
+post-plan archive mutation rejection, independent Go evaluation and cleanup.
+No production backup was used in that test.
 
 ## Prerequisites and boundaries
 
@@ -38,9 +39,64 @@ The runner freezes that immutable image ID for the attempt. It always uses
 `unix:///var/run/docker.sock`, ignoring remote Docker host/context environment
 settings. It uses no Kubernetes context, application credentials or DSN.
 
+## Bind and review inputs before restoring
+
+For a pilot, create a reviewable plan before execution. Replace the archive and
+expected count with the approved snapshot's inputs:
+
+```bash
+nostekon backup plan \
+  --file /approved/backups/orders.dump \
+  --output ./plans/orders-plan.json \
+  --expect-table public.orders=1250 \
+  --timeout 300
+python -m json.tool ./plans/orders-plan.json
+```
+
+Planning freezes and hashes a private archive copy and inspects the cached image;
+it does not create a container or run a restore. The private JSON binds the backup's
+SHA-256 and byte size, the immutable image ID, selected table expectations and the
+execution timeout. It contains no source path, credentials or rows. Review those
+fields with the backup owner, confirm the count against that snapshot and follow
+your normal data-handling and image-approval process. Protect the plan alongside
+the approved archive, outside the source repository.
+
+Then execute exactly those settings:
+
+```bash
+nostekon backup restore \
+  --file /approved/backups/orders.dump \
+  --plan ./plans/orders-plan.json \
+  --output ./evidence/orders-rehearsal.run.json
+```
+
+`--plan` rejects `--expect-table` and `--timeout` overrides, even if the supplied
+values appear equivalent. A changed archive, including one of the same size, is
+rejected with exit `2` before Docker commands or evidence-output creation. The
+runner looks up the saved image ID, not the current tag; if that image is missing
+or mismatched, the rehearsal fails without creating a target and retains failure
+evidence. It never pulls or falls back to a different image. Retain the approved
+cached image, or create and review a new plan after approving a replacement.
+
+Plans are bounded to 16 KiB, strict versioned UTF-8 JSON with no unknown or
+duplicate fields, symlinks, pipes, nonfinite numbers or invalid settings. New
+plans are published atomically with private permissions and never overwrite an
+existing path. Planning exits `0` on success, `2` on input/image/publication error
+and `130` on interruption. After interruption, inspect the output before retrying;
+a complete plan may already have been published. This is not a recovery manager.
+
+Evidence includes a **Restore plan binding** V0 check with the SHA-256 of the
+parsed plan's sorted, compact JSON. Whitespace and key order do not change that
+canonical fingerprint; changing a setting does. Retain the plan to compare its
+settings with the evidence. The fingerprint is not a signature, approval or
+authenticated provenance. Editing expectations can produce a different passing
+plan; the tool cannot prove that the backup owner's expectations were correct.
+Production authorization, application consistency and RPO remain separate gates.
+
 ## Restore and evaluate
 
-Use a backup from the approved backup process. Do not put production credentials
+For an ad hoc rehearsal without a saved plan, use a backup from the approved
+backup process. Do not put production credentials
 in commands, evidence, the repository or Studio. Replace the file and
 snapshot-specific expected count below:
 

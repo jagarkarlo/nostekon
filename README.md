@@ -433,10 +433,16 @@ no network, no writable host mount and bounded resources. Linux, the Python CLI,
 local Docker and a cached trusted `postgres:16.8` image are required:
 
 ```bash
+nostekon backup plan --file /approved/backups/orders.dump \
+  --output plans/orders-plan.json --expect-table public.orders=1250
+python -m json.tool plans/orders-plan.json
 nostekon backup restore --file /approved/backups/orders.dump \
-  --output evidence/orders-rehearsal.run.json --expect-table public.orders=1250
+  --plan plans/orders-plan.json --output evidence/orders-rehearsal.run.json
 ```
 
+Planning runs no restore: it binds the backup checksum/size, cached immutable
+image, expectations and timeout. Review the plan first; execution rejects changed
+backups and setting overrides. Plans are not signed approvals or proof of identity.
 Use an expected count from the same snapshot. Input is bounded to 64 MiB;
 database storage to 512 MiB. Requested depth is V2 without counts or V3 with them.
 Import the recorded JSON into Studio or evaluate it with `nostekon-report`.
