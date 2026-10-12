@@ -110,6 +110,7 @@ for (const width of [390, 1440]) {
     await expect(gate).toContainText("Passed");
     await expect(gate).toContainText("Complete");
     await expect(gate).toContainText("Unauthenticated provenance");
+    expect(await page.locator(".backup-pass").evaluate(element => getComputedStyle(element).color)).toBe("rgb(23, 121, 74)");
     const missing = consistent.status.checks.find((check: { name: string }) => check.name === "orders-id-required");
     missing.passed = false; missing.detail = "not_null: public.orders_bad.id; query failed; no raw database output retained";
     await page.getByTestId("evidence-input").setInputFiles({ name: "synthetic-unmeasured.run.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(consistent)) });
