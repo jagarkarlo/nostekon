@@ -450,6 +450,20 @@ strict, bound null/uniqueness/reference rules evaluated with generated read-only
 queries. At least one snapshot-specific count is required; passing proves only
 selected rules, not complete business correctness. Full scopes and measured
 violations remain visible in Studio and its Markdown export.
+Each attempt keeps a private locked `OUTPUT.json.recovery` checkpoint. After a
+hard stop or failed cleanup, inspect it without mutation:
+
+```bash
+nostekon backup recover --directory evidence/orders-rehearsal.run.json.recovery
+# Only after the runner has stopped and pending Docker creation has settled:
+nostekon backup recover --directory evidence/orders-rehearsal.run.json.recovery --confirm-cleanup
+```
+
+Confirmed cleanup verifies exact target ownership and removes only that container
+and its private snapshot. It preserves source/evidence, refuses active or
+unverifiable attempts, and never resumes a restore or fills an empty report.
+Actual SIGKILL at create/start boundaries and repeated cleanup are tested locally;
+host power loss and staging deployment recovery are not established by those tests.
 Import the recorded JSON into Studio or evaluate it with `nostekon-report`.
 Timing is rehearsal duration, not incident RTO; RPO remains unmeasured without a
 ledger. Direct production access, application readiness and in-place restoration

@@ -11,6 +11,11 @@ post-plan archive mutation rejection, independent Go evaluation and cleanup.
 Semantic profiles were also verified against nulls, duplicates and orphaned
 references despite matching row counts; nullable-key semantics, missing tables,
 failed restores, read-only sessions and desktop/mobile evidence export were tested.
+Hard-stop recovery was verified with actual SIGKILL at Docker create and start
+boundaries, including creation before the container ID was journaled, active-lock
+refusal, read-only inspection and repeated exact-target cleanup. The crash-boundary
+tests use synthetic archive bytes and stop before restore; the separate restore
+test uses the real custom dump described above. Host power loss was not tested.
 No production backup was used in that test.
 
 ## Prerequisites and boundaries
@@ -245,21 +250,65 @@ semantic consistency, application readiness, or a production recovery objective.
 
 ## Cleanup and failure handling
 
-The generated `nostekon-backup-*` target is force-removed after success, failure,
-timeout or a handled interruption. Failed cleanup is a failed check. Inspect the
-exact name in evidence before removing it manually:
+The runner attempts cleanup after success, failure, timeout or handled interruption.
+Before creating a target it creates a private `OUTPUT.json.recovery` directory
+(mode `0700`), atomic `recovery.json` and exclusive `lock` (mode `0600`), and a
+read-only private `backup.dump` copy (mode `0444`). It holds the lock through
+cleanup and evidence publication. Normal cleanup removes the owned target and
+copy, but retains the cleaned checkpoint. Failed cleanup is a failed V2 check;
+the copy remains available for guarded cleanup, not automatic resume.
+
+After a failed cleanup or hard stop, inspect the **original** checkpoint directory
+from the same Linux account and local Docker daemon:
 
 ```bash
-docker --host unix:///var/run/docker.sock ps -a \
-  --filter label=io.nostekon.purpose=backup-rehearsal
-# Only after identifying this attempt's generated container:
-docker --host unix:///var/run/docker.sock rm --force nostekon-backup-REPLACE_WITH_RUN_ID
+nostekon backup recover \
+  --directory ./evidence/orders-rehearsal.run.json.recovery
 ```
 
-Never prune all containers or remove unrelated targets. Reports stay outside the
-temporary database. Keep original approved backups according to retention policy;
-the runner never erases the source. Investigate a count mismatch; do not lower
-expectations until the report turns green.
+Without confirmation, this prints a JSON `PostgreSQLBackupRecoveryReview` and
+changes no checkpoint, archive or container. Review `checkpointStatus`,
+`containerPresent`, `snapshotPresent` and `observedContainerId`; a created target
+may have an observed ID before its ID was saved. An active runner blocks recovery
+before any Docker call.
+
+Only after confirming that the runner has stopped **and any pending Docker create
+activity has settled**, authorize cleanup:
+
+```bash
+nostekon backup recover \
+  --directory ./evidence/orders-rehearsal.run.json.recovery \
+  --confirm-cleanup
+```
+
+Confirmation is an operator assertion, not automatic proof of quiescence. This
+matters when a stop interrupted creation before its outcome was recorded: current
+absence alone cannot rule out a late create. Cleanup validates the full container
+ID, generated name, immutable image and purpose/run/directory-identity labels;
+only then does it remove that exact ID and the journal's snapshot. A copied
+checkpoint cannot remove the original target. Known-ID lookup never falls back to
+deleting a same-name replacement. The review reports `cleaned`; repeated confirmed
+cleanup is a no-op after verifying absence. Inspection/cleanup share a 30-second
+deadline. Exit codes are `0` for a successful review or cleanup, `2` for invalid,
+busy, inaccessible or unverifiable state, and `130` for interruption.
+
+On an error, stop and investigate with the backup owner/restore-host operator.
+Do not alter metadata, bypass the lock, trust a copied directory, force removal
+by name, or prune unrelated containers. A corrupt checkpoint or changed ownership
+requires manual investigation, not a guessed target. A cleanup command failure
+can be retried after resolving Docker access and confirming quiescence again.
+
+Recovery never signals a saved PID, resumes a restore, or creates/overwrites a
+DrillRun. A reserved empty output remains empty and is **not evidence of success**;
+start a fresh attempt with a new output after cleanup. Treat retained snapshots
+as backup data under the same access and retention policy. Hard stops before a
+checkpoint exists, or the runner's original temporary frozen copy after SIGKILL,
+are not swept by this command; inspect those residues offline on the dedicated
+host. Filesystem sync is used, but no host-power-loss guarantee is claimed.
+
+The approved source archive and existing evidence are never erased by recovery.
+Investigate a count mismatch; do not lower expectations until the report turns
+green. The review is cleanup state only, not restore evidence or an RTO/RPO result.
 
 ## Production-readiness gates
 
@@ -271,7 +320,8 @@ synthetic test.
 
 **Before direct production integration:** read-only backup-store credentials,
 allowlisted isolated targets, least privilege and egress controls, operator
-approval/audit, authenticated remote execution, interruption recovery,
+approval/audit, authenticated remote execution, staging-validated interruption
+handling for the chosen deployment mode,
 owner-validated business-rule coverage beyond these three basic check types,
 and an independently captured
 acknowledged-write ledger for RPO. Prove these on staging first. Production failure
