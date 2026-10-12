@@ -248,6 +248,65 @@ with the current contract. No ledger is manufactured: RPO and acknowledged-write
 loss remain unmeasured. A V3 pass proves only specified checks, not all data,
 semantic consistency, application readiness, or a production recovery objective.
 
+## Gate a captured rehearsal against its plan
+
+Verified locally on 2026-10-12 against actual Python-generated v1/v2 plans and
+isolated PostgreSQL captures: passing counts/rules, wrong counts, equal-count
+semantic corruption, missing relations and incomplete restores. A numerically
+altered capture which still received a normal `verified` report was rejected by
+this independent gate. No Docker or production connection is needed for review.
+
+Use the reviewed plan and its original captured JSON. For the semantic example
+above, using the report binary built in the preceding section:
+
+```bash
+/tmp/nostekon-report --backup-plan ./plans/orders-semantic-plan.json \
+  ./evidence/orders-semantic-rehearsal.run.json
+```
+
+The same flag accepts v1 plans without semantic rules. It emits a JSON
+`PostgreSQLBackupReview`, not a new DrillRun. The Go reviewer independently checks:
+
+- Strict, bounded plan schema and canonical plan fingerprint; archive digest/size
+  and immutable image identity must match the recorded V0 checks.
+- Exactly one required restore, health and cleanup check, with the recorded
+  cleanup target matching the evidence run name.
+- Every planned table count, its expected value and numeric measurement;
+  the recorded pass flag must agree with the measured result.
+- Every planned semantic rule's full type/table/column/reference scope,
+  numeric violation result or explicit failure/not-evaluated state.
+- Exact requested depth and ordered invariant declarations; no extra count/rule
+  scope, missing/duplicate checks, invented ledger or unplanned objectives.
+
+`passed` is true only for complete, matching evidence with an independently
+passing report. `complete` means required observations are present; an explicit
+query failure or not-evaluated rule is not a measurement. `evidenceMatches` means
+the recorded claims agree with the supplied plan and their numeric pass flags,
+**not** that the data passed. A real count mismatch or semantic violation can be
+complete and matching while still failing. `issues` explains drift or omissions;
+the nested `report` retains the ordinary recovery verdict and unmeasured RPO.
+
+Exit codes are `0` passing gate, `1` valid failed/incomplete/mismatched review,
+and `2` invalid/unreadable/oversized input or output failure. Plans are limited to
+16 KiB and evidence to 16 MiB; symlinks and known non-regular inputs are rejected.
+Duplicate fields, nonfinite numbers, excessive nesting, unknown plan fields and
+invalid identifier/count types fail admission. Gate mode cannot mix `--suite`,
+per-run attestation or Pushgateway options; it performs no network call or restore.
+
+Keep the JSON review beside the originals. `planSHA256` is the canonical settings
+identity; `planFileSHA256` and `evidenceSHA256` bind the exact supplied bytes.
+Formatting can change the plan file digest without changing canonical identity.
+These are consistency checks, not signatures, approval or authenticated capture;
+provenance remains `unverified`. Independently review the plan with the backup
+owner. A party able to forge both plan and evidence can forge consistent claims.
+Studio imports the original DrillRun, not this gate JSON; signature verification
+is a separate operation and does not establish runner truth.
+
+The synthetic backup CI job retains only original plans, captures and independent
+reviews for seven days, including expected failed scenarios. Dumps, recovery
+snapshots, locks and raw database output are excluded. Hosted execution must be
+checked separately; local tests do not establish a passing hosted run.
+
 ## Cleanup and failure handling
 
 The runner attempts cleanup after success, failure, timeout or handled interruption.

@@ -465,6 +465,20 @@ unverifiable attempts, and never resumes a restore or fills an empty report.
 Actual SIGKILL at create/start boundaries and repeated cleanup are tested locally;
 host power loss and staging deployment recovery are not established by those tests.
 Import the recorded JSON into Studio or evaluate it with `nostekon-report`.
+Gate a planned capture independently, without Docker or a production connection:
+
+```bash
+go build -o /tmp/nostekon-report ./cmd/nostekon-report
+/tmp/nostekon-report --backup-plan plans/orders-plan.json evidence/orders-rehearsal.run.json
+```
+
+The gate checks the canonical plan binding, archive/image identities, selected
+counts and semantic scopes/measurements, required cleanup and recorded pass flags.
+It returns JSON plus exit `0` for a passing gate, `1` for a failed/incomplete or
+mismatched review, and `2` for invalid input/output. Original-byte hashes are
+included; consistency is not authenticated capture or operator approval. A
+matching failed rehearsal stays failed. CI retains original synthetic plan/run/
+review JSON, never backup dumps or recovery copies.
 Timing is rehearsal duration, not incident RTO; RPO remains unmeasured without a
 ledger. Direct production access, application readiness and in-place restoration
 are not provided. See the
