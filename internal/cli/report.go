@@ -48,7 +48,7 @@ func readBackupInput(path string, limit int64) ([]byte, error) {
 // Run evaluates a captured DrillRun file. The exported entry point is shared
 // by the standalone command and tests.
 func Run(args []string, stdout, stderr io.Writer) int {
-	usage := "usage: nostekon-report [--suite | --backup-plan PLAN.json] [--attestation FILE --trusted-key PUBLIC.pem] [--pushgateway-url URL [--pushgateway-job NAME] [--pushgateway-instance NAME]] <run.json | suite-directory | evidence.zip>"
+	usage := "usage: nostekon-report [--suite | --backup-plan PLAN.json [--export-backup-bundle] | --backup-bundle] [--attestation FILE --trusted-key PUBLIC.pem] [--pushgateway-url URL [--pushgateway-job NAME] [--pushgateway-instance NAME]] <run.json | suite-directory | evidence.zip>"
 	if len(args) == 0 || len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Fprintln(stderr, usage)
 		if len(args) == 1 {
@@ -60,6 +60,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	suiteMode := flags.Bool("suite", false, "gate a captured PostgreSQL policy suite directory or evidence ZIP")
 	backupPlanPath := flags.String("backup-plan", "", "independently gate captured backup evidence against a reviewed restore plan")
+	backupBundleMode := flags.Bool("backup-bundle", false, "gate an original-only backup bundle offline with a freshly computed review")
+	exportBackupBundle := flags.Bool("export-backup-bundle", false, "with --backup-plan, write a portable ZIP to stdout instead of review JSON")
 	attestationPath := flags.String("attestation", "", "detached Ed25519 attestation JSON file")
 	trustedKeyPath := flags.String("trusted-key", "", "trusted Ed25519 PKIX public key PEM")
 	pushgatewayURL := flags.String("pushgateway-url", "", "push recovery metrics to this Prometheus Pushgateway URL")
@@ -79,29 +81,55 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			backupMode = true
 		}
 	})
-	if backupMode {
-		if *suiteMode || *attestationPath != "" || *pushgatewayURL != "" || *pushgatewayJob != "nostekon" || *pushgatewayInstance != "" {
-			fmt.Fprintln(stderr, "backup-plan mode cannot use suite, attestation or Pushgateway flags")
+	if backupMode || *backupBundleMode || *exportBackupBundle {
+		if *suiteMode || *attestationPath != "" || *pushgatewayURL != "" || *pushgatewayJob != "nostekon" || *pushgatewayInstance != "" || backupMode && *backupBundleMode || *exportBackupBundle && !backupMode {
+			fmt.Fprintln(stderr, "backup modes cannot be combined or use suite, attestation or Pushgateway flags; export requires --backup-plan")
 			return 2
 		}
-		planData, err := readBackupInput(*backupPlanPath, backupreview.MaxPlanBytes)
-		if err != nil {
-			fmt.Fprintf(stderr, "read backup plan: %v\n", err)
-			return 2
+		var planData, evidenceData []byte
+		var review backupreview.Review
+		var err error
+		if *backupBundleMode {
+			var archive []byte
+			archive, err = readBackupInput(flags.Arg(0), backupreview.MaxBundleBytes)
+			if err == nil {
+				var imported backupreview.ImportedBundle
+				imported, err = backupreview.ReadBundle(archive)
+				review = imported.Review
+			}
+		} else {
+			planData, err = readBackupInput(*backupPlanPath, backupreview.MaxPlanBytes)
+			if err != nil {
+				fmt.Fprintf(stderr, "read backup plan: %v\n", err)
+				return 2
+			}
+			evidenceData, err = readBackupInput(flags.Arg(0), maxReportInputBytes)
+			if err != nil {
+				fmt.Fprintf(stderr, "read backup evidence: %v\n", err)
+				return 2
+			}
+			review, err = backupreview.Evaluate(planData, evidenceData)
 		}
-		evidenceData, err := readBackupInput(flags.Arg(0), maxReportInputBytes)
-		if err != nil {
-			fmt.Fprintf(stderr, "read backup evidence: %v\n", err)
-			return 2
-		}
-		review, err := backupreview.Evaluate(planData, evidenceData)
 		if err != nil {
 			fmt.Fprintf(stderr, "review backup: %v\n", err)
 			return 2
 		}
-		encoder := json.NewEncoder(stdout)
-		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(review); err != nil {
+		if *exportBackupBundle {
+			var archive []byte
+			archive, err = backupreview.Bundle(planData, evidenceData)
+			if err == nil {
+				var written int
+				written, err = stdout.Write(archive)
+				if err == nil && written != len(archive) {
+					err = io.ErrShortWrite
+				}
+			}
+		} else {
+			encoder := json.NewEncoder(stdout)
+			encoder.SetIndent("", "  ")
+			err = encoder.Encode(review)
+		}
+		if err != nil {
 			fmt.Fprintf(stderr, "write backup review: %v\n", err)
 			return 2
 		}
