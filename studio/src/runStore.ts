@@ -9,6 +9,7 @@ export interface SavedRun {
   id: string;
   source: string;
   attestation?: string;
+  backupPlan?: string;
   report: Report;
   sampleId: string;
   savedAt: number;
@@ -31,13 +32,13 @@ export const SUITE_LIMIT = 20;
 const SOURCE_LIMIT = 16 * 1024 * 1024;
 const suiteNames = ["suite.json", "zero-loss.drillrun.json", "tail-loss.drillrun.json", "budget-loss.drillrun.json"];
 
-function validateAttestation(attestation: unknown): void {
-  if (attestation === undefined || attestation === "") return;
-  if (typeof attestation !== "string" || new TextEncoder().encode(attestation).length > 16 * 1024) throw new Error("Attached attestation exceeds the 16 KiB limit or is unreadable.");
+function validateAttachment(original: unknown, name: string): void {
+  if (original === undefined || original === "") return;
+  if (typeof original !== "string" || new TextEncoder().encode(original).length > 16 * 1024) throw new Error(`Attached ${name} exceeds the 16 KiB limit or is unreadable.`);
   try {
-    const value: unknown = JSON.parse(attestation);
+    const value: unknown = JSON.parse(original);
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
-  } catch { throw new Error("Attached attestation must contain a JSON object."); }
+  } catch { throw new Error(`Attached ${name} must contain a JSON object.`); }
 }
 
 async function database() {
@@ -96,26 +97,30 @@ export async function listRuns(): Promise<SavedRun[]> {
     if (runs.some((run) => typeof run.source !== "string" || typeof run.id !== "string" || !isReport(run.report))) {
       throw new Error("Saved run data is unreadable. Export available evidence before clearing site storage.");
     }
-    for (const run of runs) validateAttestation(run.attestation);
+    for (const run of runs) {
+      validateAttachment(run.attestation, "attestation");
+      validateAttachment(run.backupPlan, "backup plan");
+    }
     return runs.sort((left, right) => right.savedAt - left.savedAt);
   } finally { db.close(); }
 }
 
-export async function saveRun(source: string, report: Report, sampleId = "", attestation?: string): Promise<SavedRun> {
-  return (await saveRuns([{ source, report, sampleId, attestation }]))[0];
+export async function saveRun(source: string, report: Report, sampleId = "", attestation?: string, backupPlan?: string): Promise<SavedRun> {
+  return (await saveRuns([{ source, report, sampleId, attestation, backupPlan }]))[0];
 }
 
-export async function saveRuns(inputs: readonly { source: string; report: Report; sampleId?: string; attestation?: string }[]): Promise<SavedRun[]> {
+export async function saveRuns(inputs: readonly { source: string; report: Report; sampleId?: string; attestation?: string; backupPlan?: string }[]): Promise<SavedRun[]> {
   if (!inputs.length) return [];
   const runs: SavedRun[] = [];
   const savedAt = Date.now();
-  for (const { source, report, sampleId = "", attestation } of inputs) {
-    validateAttestation(attestation);
+  for (const { source, report, sampleId = "", attestation, backupPlan } of inputs) {
+    validateAttachment(attestation, "attestation");
+    validateAttachment(backupPlan, "backup plan");
     const bytes = new TextEncoder().encode(source);
     if (bytes.length > SOURCE_LIMIT) throw new Error("Evidence exceeds the 16 MiB limit.");
     const digest = await crypto.subtle.digest("SHA-256", bytes);
     const id = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-    runs.push({ id, source, report, sampleId, savedAt, ...(attestation === undefined ? {} : { attestation }) });
+    runs.push({ id, source, report, sampleId, savedAt, ...(attestation === undefined ? {} : { attestation }), ...(backupPlan === undefined ? {} : { backupPlan }) });
   }
   const db = await database();
   try {
@@ -128,9 +133,12 @@ export async function saveRuns(inputs: readonly { source: string; report: Report
           if (count >= RUN_LIMIT) throw new Error(`The library holds ${RUN_LIMIT} runs. Delete a run before saving another.`);
           count++;
         }
-        if (run.attestation === undefined && existing?.attestation !== undefined) {
-          validateAttestation(existing.attestation);
-          run.attestation = existing.attestation;
+        for (const field of ["attestation", "backupPlan"] as const) {
+          const attached = existing?.[field];
+          if (run[field] === undefined && attached !== undefined) {
+            validateAttachment(attached, field === "attestation" ? "attestation" : "backup plan");
+            run[field] = attached;
+          }
         }
         await transaction.store.put(run);
       }

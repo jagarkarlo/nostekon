@@ -107,6 +107,27 @@ describe("saved suite snapshots", () => {
 });
 
 describe("saved run library", () => {
+  it("retains exact backup plans across reopen and unsigned updates, with explicit removal", async () => {
+    const source = '{ "run": "backup rehearsal" }\n';
+    const backupPlan = '{ "kind": "PostgreSQLRestorePlan", "original": true }\n';
+    await saveRuns([{ source, report, backupPlan }]);
+    await saveRuns([{ source, report: { ...report, headline: "Fresh evaluation" } }]);
+    const reopened = (await listRuns())[0];
+    expect(reopened.backupPlan).toBe(backupPlan);
+    expect(reopened.source).toBe(source);
+    expect(reopened).not.toHaveProperty("backupReview");
+    await saveRuns([{ source, report, backupPlan: "" }]);
+    expect((await listRuns())[0].backupPlan).toBe("");
+    expect(await listRuns()).toHaveLength(1);
+  });
+
+  it("rejects malformed and oversized plans before any batch write", async () => {
+    for (const backupPlan of ["not JSON", "null", "[]", JSON.stringify({ text: "\u00e9".repeat(9 * 1024) })]) {
+      await expect(saveRuns([{ source: "first", report }, { source: "second", report, backupPlan }])).rejects.toThrow("Attached backup plan");
+      expect(await listRuns()).toEqual([]);
+    }
+  });
+
   it("preserves attached originals across reload and unsigned updates without storing a receipt", async () => {
     const source = '{ "run": "signed original" }\n';
     const attestation = '{ "apiVersion": "nostekon/attestation/v1alpha1", "signature": "not yet checked" }\n';
@@ -135,19 +156,19 @@ describe("saved run library", () => {
     expect((await indexedDB.databases()).map((db) => db.name)).toEqual(["nostekon-runs"]);
   });
 
-  it("retains corrupt attached originals and reports the failure without pruning", async () => {
+  it.each(["attestation", "backupPlan"] as const)("retains corrupt %s originals and reports the failure without pruning", async (field) => {
     const saved = await saveRun("original", report);
     const db = await openDB("nostekon-runs", 2);
-    try { await db.put("runs", { ...saved, attestation: "damaged JSON" }); }
+    try { await db.put("runs", { ...saved, [field]: "damaged JSON" }); }
     finally { db.close(); }
-    await expect(listRuns()).rejects.toThrow("Attached attestation");
+    await expect(listRuns()).rejects.toThrow(field === "attestation" ? "Attached attestation" : "Attached backup plan");
     const check = await openDB("nostekon-runs", 2);
-    try { expect((await check.get("runs", saved.id)).attestation).toBe("damaged JSON"); }
+    try { expect((await check.get("runs", saved.id))[field]).toBe("damaged JSON"); }
     finally { check.close(); }
   });
 
   it("rolls back replacement attachments and preserves the old originals on quota failure", async () => {
-    await saveRun("existing", report, "", '{ "signature": "original" }\n');
+    await saveRun("existing", report, "", '{ "signature": "original" }\n', '{ "plan": "original" }\n');
     const before = await listRuns();
     const originalPut = IDBObjectStore.prototype.put;
     const failure = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, key) {
@@ -156,8 +177,8 @@ describe("saved run library", () => {
     });
     try {
       await expect(saveRuns([
-        { source: "existing", report, attestation: '{"signature":"replacement"}' },
-        { source: "second", report, attestation: '{"signature":"new"}' },
+        { source: "existing", report, attestation: '{"signature":"replacement"}', backupPlan: '{"plan":"replacement"}' },
+        { source: "second", report, attestation: '{"signature":"new"}', backupPlan: '{"plan":"new"}' },
       ])).rejects.toThrow("Storage full");
     } finally { failure.mockRestore(); }
     expect(await listRuns()).toEqual(before);

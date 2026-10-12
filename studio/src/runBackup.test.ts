@@ -8,6 +8,25 @@ const attestationSha256 = "2969a294fa8ff367e486b12d5f424528b6990ae95035794c0b85a
 const document = { apiVersion: "nostekon/run-backup/v1alpha1", kind: "RunBackup", runs: [{ sha256, evidence: source, attestation, attestationSha256 }] };
 
 describe("original-run backups", () => {
+  it("round-trips original plans in v2 with a fixed independent hash and no review cache", async () => {
+    const backupPlan = '{ "kind": "PostgreSQLRestorePlan", "original": true }\n';
+    const encoded = await createRunBackup([{ source, attestation, backupPlan }]);
+    const backup = JSON.parse(encoded);
+    expect(backup.apiVersion).toBe("nostekon/run-backup/v2alpha1");
+    expect(backup.runs[0]).toEqual({ ...document.runs[0], backupPlan, backupPlanSha256: "0f55a8eeceb1103d5e7d7b04b871be776a04022f4c2ca04bcae254c7aa1ed25d" });
+    expect(await readRunBackup(encoded)).toEqual([{ source, attestation, backupPlan }]);
+    for (const changed of [
+      { ...backup.runs[0], backupPlan: backupPlan + "\n" },
+      { ...backup.runs[0], backupPlan: undefined },
+      { ...backup.runs[0], backupPlanSha256: undefined },
+      { ...backup.runs[0], backupReview: { passed: true } },
+    ]) await expect(readRunBackup(JSON.stringify({ ...backup, runs: [changed] }))).rejects.toThrow();
+    await expect(readRunBackup(JSON.stringify({ ...backup, apiVersion: document.apiVersion }))).rejects.toThrow();
+    for (const backupPlan of ["not JSON", "[]", JSON.stringify({ text: "\u00e9".repeat(9 * 1024) })]) {
+      await expect(createRunBackup([{ source, backupPlan }])).rejects.toThrow();
+    }
+  });
+
   it("preserves exact originals with independent hashes and excludes reports or trust", async () => {
     const run = { source, attestation, report: { verdict: "verified" }, trusted: true, sampleId: "recorded" };
     const encoded = await createRunBackup([run]);
