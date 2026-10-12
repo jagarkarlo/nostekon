@@ -42,12 +42,36 @@ def test_bad_or_oversized_backup_leaves_no_snapshot(tmp_path, monkeypatch, paylo
 def fake_docker(
     commands, *, fail_restore=False, fail_cleanup=False, count=b"3\n", invariant_count=None
 ):
+    target = None
+
     def execute(arguments, *, timeout):
+        nonlocal target
         commands.append(arguments)
         if arguments[:2] == ["image", "inspect"]:
             return b"sha256:" + b"a" * 64
         if arguments[:2] == ["rm", "--force"] and fail_cleanup:
             raise subprocess.CalledProcessError(1, "docker")
+        if arguments[0] == "create":
+            labels = {
+                argument.split("=", 2)[1]: argument.split("=", 2)[2]
+                for argument in arguments
+                if argument.startswith("--label=")
+            }
+            target = {
+                "id": "c" * 64,
+                "name": "/" + arguments[arguments.index("--name") + 1],
+                "image": next(argument for argument in arguments if argument.startswith("sha256:")),
+                "purpose": labels["io.nostekon.purpose"],
+                "runId": labels["io.nostekon.run-id"],
+                "journal": labels["io.nostekon.journal"],
+            }
+            return b"c" * 64
+        if arguments[0] == "ps":
+            return target["id"].encode() if target is not None else b""
+        if arguments[0] == "inspect":
+            return json.dumps(target).encode()
+        if arguments[:2] == ["rm", "--force"]:
+            target = None
         if "pg_restore" in arguments and "--exit-on-error" in arguments and fail_restore:
             raise subprocess.CalledProcessError(1, "docker")
         if "psql" in arguments:
@@ -173,6 +197,98 @@ def test_recovery_publication_failure_preserves_previous_checkpoint(tmp_path, mo
         assert (directory / "recovery.json").read_bytes() == previous
         assert journal.record["status"] == "prepared"
         assert list(directory.glob(".recovery-*")) == []
+
+
+def test_runner_checkpoints_ownership_before_create_and_exact_id_before_start(
+    tmp_path, monkeypatch
+):
+    commands = []
+    delegate = fake_docker(commands)
+    output = tmp_path / "run.json"
+    directory = tmp_path / "run.json.recovery"
+
+    def execute(arguments, *, timeout):
+        if arguments[0] == "create":
+            record = json.loads((directory / "recovery.json").read_text())
+            assert record["status"] == "prepared"
+            assert record["containerId"] is None
+            assert f"--label=io.nostekon.run-id={record['runId']}" in arguments
+            assert (directory / "backup.dump").read_bytes() == b"PGDMPfixture"
+            assert stat.S_IMODE((directory / "backup.dump").stat().st_mode) == 0o444
+            with pytest.raises(ValueError, match="active"), RecoveryJournal.open(directory):
+                pass
+        if arguments[0] == "start":
+            record = json.loads((directory / "recovery.json").read_text())
+            assert record["status"] == "running"
+            assert record["containerId"] == "c" * 64
+            assert arguments[1] == "c" * 64
+        return delegate(arguments, timeout=timeout)
+
+    monkeypatch.setattr(restore, "docker_command", execute)
+    backup = tmp_path / "source.dump"
+    backup.write_bytes(b"PGDMPfixture")
+    run = restore.execute_backup_restore(backup, output)
+    assert all(check["passed"] for check in run["status"]["checks"])
+    record = json.loads((directory / "recovery.json").read_text())
+    assert record["status"] == "cleaned"
+    assert record["name"] == run["metadata"]["name"]
+    assert commands[-1] == ["rm", "--force", "c" * 64]
+    assert not (directory / "backup.dump").exists()
+    assert backup.read_bytes() == b"PGDMPfixture"
+
+
+def test_failed_cleanup_retains_private_snapshot_and_recovery_state(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands, fail_cleanup=True))
+    source = tmp_path / "source.dump"
+    source.write_bytes(b"PGDMPfixture")
+    output = tmp_path / "run.json"
+    run = restore.execute_backup_restore(source, output)
+    directory = tmp_path / "run.json.recovery"
+    with RecoveryJournal.open(directory) as journal:
+        assert journal.record["status"] == "cleanup-required"
+        assert journal.record["containerId"] == "c" * 64
+    assert (directory / "backup.dump").read_bytes() == source.read_bytes()
+    assert any(
+        check["name"] == "Isolated target cleanup" and not check["passed"]
+        for check in run["status"]["checks"]
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"id": "d" * 64},
+        {"name": "/unrelated"},
+        {"image": "sha256:" + "e" * 64},
+        {"purpose": "other"},
+        {"runId": "e" * 32},
+        {"journal": "f" * 64},
+    ],
+)
+def test_cleanup_refuses_changed_target_ownership(tmp_path, monkeypatch, change):
+    commands = []
+    delegate = fake_docker(commands)
+
+    def execute(arguments, *, timeout):
+        result = delegate(arguments, timeout=timeout)
+        if arguments[0] == "inspect":
+            target = json.loads(result)
+            target.update(change)
+            return json.dumps(target).encode()
+        return result
+
+    monkeypatch.setattr(restore, "docker_command", execute)
+    source = tmp_path / "source.dump"
+    source.write_bytes(b"PGDMPfixture")
+    output = tmp_path / "run.json"
+    run = restore.execute_backup_restore(source, output)
+    assert not any(command[0] == "rm" for command in commands)
+    assert any(
+        check["name"] == "Isolated target cleanup" and not check["passed"]
+        for check in run["status"]["checks"]
+    )
+    assert (tmp_path / "run.json.recovery" / "backup.dump").exists()
 
 
 def test_plan_binds_exact_backup_and_cached_image_without_restoring(tmp_path, monkeypatch):

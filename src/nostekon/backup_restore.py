@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import ExitStack, suppress
 from pathlib import Path
 from uuid import uuid4
 
@@ -307,6 +308,8 @@ def execute_backup_restore(
 ) -> dict:
     if sys.platform != "linux":
         raise ValueError("backup rehearsal currently requires Linux and a local Docker daemon")
+    from nostekon.backup_recovery import RecoveryJournal
+
     restore_plan = None
     if plan is not None:
         if tables is not None or timeout is not None:
@@ -320,12 +323,14 @@ def execute_backup_restore(
     invariants = restore_plan.get("invariants", []) if restore_plan else []
     checks = []
     phases = []
-    name = f"nostekon-backup-{uuid4().hex[:12]}"
+    run_id = uuid4().hex
+    name = f"nostekon-backup-{run_id[:12]}"
     level = "V0"
     started_at = utc_timestamp()
     deadline = time.monotonic() + timeout
     attempted = False
     interrupted = False
+    journal = None
 
     def command(*arguments):
         remaining = deadline - time.monotonic()
@@ -340,7 +345,10 @@ def execute_backup_restore(
         finally:
             phases.append({"name": title, "startedAt": start, "endedAt": utc_timestamp()})
 
-    with tempfile.TemporaryDirectory(prefix="nostekon-restore-") as directory:
+    with (
+        tempfile.TemporaryDirectory(prefix="nostekon-restore-") as directory,
+        ExitStack() as resources,
+    ):
         snapshot = snapshot_backup(backup, Path(directory))
         if "," in str(snapshot):
             raise ValueError("backup workspace path cannot contain Docker mount separators")
@@ -392,49 +400,66 @@ def execute_backup_restore(
                         "not operator approval or authenticated provenance",
                     }
                 )
-            attempted = True
-            phase(
-                "Create isolated target",
-                lambda: command(
-                    "create",
-                    "--name",
-                    name,
-                    "--label=io.nostekon.purpose=backup-rehearsal",
-                    "--pull=never",
-                    "--network=none",
-                    "--read-only",
-                    "--cap-drop=ALL",
-                    "--security-opt=no-new-privileges",
-                    "--user=999:999",
-                    "--log-driver=none",
-                    "--memory=512m",
-                    "--cpus=1",
-                    "--pids-limit=128",
-                    "--tmpfs",
-                    "/var/lib/postgresql/data:rw,noexec,nosuid,size=512m,uid=999,gid=999,mode=0700",
-                    "--tmpfs",
-                    "/var/run/postgresql:rw,noexec,nosuid,size=16m,uid=999,gid=999",
-                    "--tmpfs",
-                    "/tmp:rw,noexec,nosuid,size=16m,mode=1777",
-                    "--mount",
-                    f"type=bind,src={snapshot},dst=/backup.dump,readonly",
-                    "--env=POSTGRES_HOST_AUTH_METHOD=trust",
-                    "--env=POSTGRES_DB=nostekon",
-                    image,
-                    "postgres",
-                    "-c",
-                    "listen_addresses=127.0.0.1",
-                ),
+            recovery_directory = output.with_name(output.name + ".recovery").absolute()
+            if "," in str(recovery_directory):
+                raise ValueError("recovery workspace path cannot contain Docker mount separators")
+            journal = resources.enter_context(
+                RecoveryJournal.create(recovery_directory, run_id=run_id, image_id=image)
             )
+            snapshot = snapshot_backup(snapshot, journal.directory)
+            journal.update("prepared")
+            attempted = True
+            container_id = (
+                phase(
+                    "Create isolated target",
+                    lambda: command(
+                        "create",
+                        "--name",
+                        name,
+                        "--label=io.nostekon.purpose=backup-rehearsal",
+                        f"--label=io.nostekon.run-id={run_id}",
+                        f"--label=io.nostekon.journal={journal.binding}",
+                        "--pull=never",
+                        "--network=none",
+                        "--read-only",
+                        "--cap-drop=ALL",
+                        "--security-opt=no-new-privileges",
+                        "--user=999:999",
+                        "--log-driver=none",
+                        "--memory=512m",
+                        "--cpus=1",
+                        "--pids-limit=128",
+                        "--tmpfs",
+                        "/var/lib/postgresql/data:rw,noexec,nosuid,size=512m,uid=999,gid=999,mode=0700",
+                        "--tmpfs",
+                        "/var/run/postgresql:rw,noexec,nosuid,size=16m,uid=999,gid=999",
+                        "--tmpfs",
+                        "/tmp:rw,noexec,nosuid,size=16m,mode=1777",
+                        "--mount",
+                        f"type=bind,src={snapshot},dst=/backup.dump,readonly",
+                        "--env=POSTGRES_HOST_AUTH_METHOD=trust",
+                        "--env=POSTGRES_DB=nostekon",
+                        image,
+                        "postgres",
+                        "-c",
+                        "listen_addresses=127.0.0.1",
+                    ),
+                )
+                .decode("ascii")
+                .strip()
+            )
+            if not re.fullmatch(r"[a-f0-9]{64}", container_id):
+                raise ValueError("Docker create did not return an exact container ID")
+            journal.update("running", container_id=container_id)
             level = "V1"
-            command("start", name)
+            command("start", container_id)
 
             def wait_ready():
                 while True:
                     try:
                         command(
                             "exec",
-                            name,
+                            container_id,
                             "pg_isready",
                             "-h",
                             "127.0.0.1",
@@ -454,7 +479,7 @@ def execute_backup_restore(
                 "Restore custom archive",
                 lambda: command(
                     "exec",
-                    name,
+                    container_id,
                     "pg_restore",
                     "--exit-on-error",
                     "--single-transaction",
@@ -483,7 +508,7 @@ def execute_backup_restore(
                         "exec",
                         "--env=PGOPTIONS=-c default_transaction_read_only=on "
                         "-c statement_timeout=5000 -c lock_timeout=1000",
-                        name,
+                        container_id,
                         "psql",
                         "--no-psqlrc",
                         "--username=postgres",
@@ -566,11 +591,11 @@ def execute_backup_restore(
                 }
             )
         finally:
-            if attempted:
+            if journal is not None:
                 try:
                     phase(
                         "Remove isolated target",
-                        lambda: docker_command(["rm", "--force", name], timeout=30),
+                        lambda: journal.cleanup(docker_command, allow_absent=not attempted),
                     )
                     checks.append(
                         {
@@ -582,17 +607,20 @@ def execute_backup_restore(
                     )
                 except (
                     OSError,
+                    ValueError,
                     RuntimeError,
                     subprocess.SubprocessError,
                     KeyboardInterrupt,
                 ) as error:
                     interrupted = interrupted or isinstance(error, KeyboardInterrupt)
+                    with suppress(OSError, ValueError):
+                        journal.update("cleanup-required")
                     checks.append(
                         {
                             "level": "V2",
                             "name": "Isolated target cleanup",
                             "passed": False,
-                            "detail": f"Cleanup failed for {name}; manual removal required",
+                            "detail": f"Cleanup failed for {name}; guarded recovery required",
                         }
                     )
             evaluated = {check["name"] for check in checks if check["level"] == "V4"}

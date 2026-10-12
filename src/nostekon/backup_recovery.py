@@ -1,8 +1,10 @@
 import fcntl
+import hashlib
 import json
 import os
 import re
 import stat
+import time
 from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
@@ -173,6 +175,80 @@ class RecoveryJournal:
         if container_id is not None:
             record["containerId"] = container_id
         self._write(record)
+
+    @property
+    def binding(self) -> str:
+        metadata = os.fstat(self._descriptor)
+        return hashlib.sha256(f"{metadata.st_dev}:{metadata.st_ino}".encode()).hexdigest()
+
+    def inspect_target(self, command):
+        record = self.record
+        selector = (
+            f"id={record['containerId']}" if record["containerId"] else f"name=^/{record['name']}$"
+        )
+        raw = (
+            command(["ps", "--all", "--quiet", "--no-trunc", f"--filter={selector}"], timeout=30)
+            .decode("ascii")
+            .strip()
+        )
+        if not raw:
+            return None
+        if not re.fullmatch(r"[a-f0-9]{64}", raw) or record["containerId"] not in (None, raw):
+            raise ValueError("recovery target lookup was ambiguous or changed identity")
+        template = (
+            '{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},'
+            '"purpose":{{json (index .Config.Labels "io.nostekon.purpose")}},'
+            '"runId":{{json (index .Config.Labels "io.nostekon.run-id")}},'
+            '"journal":{{json (index .Config.Labels "io.nostekon.journal")}}}'
+        )
+        payload = command(["inspect", f"--format={template}", raw], timeout=30)
+        try:
+            target = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_fields)
+        except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
+            raise ValueError("recovery target inspection returned invalid JSON") from error
+        if target != {
+            "id": raw,
+            "name": f"/{record['name']}",
+            "image": record["imageId"],
+            "purpose": "backup-rehearsal",
+            "runId": record["runId"],
+            "journal": self.binding,
+        }:
+            raise ValueError("target ownership does not match this recovery checkpoint")
+        return raw
+
+    def cleanup(self, command, *, allow_absent: bool = False) -> dict:
+        deadline = time.monotonic() + 30
+
+        def bounded(arguments, *, timeout):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("recovery cleanup deadline exceeded")
+            return command(arguments, timeout=min(timeout, remaining))
+
+        identity = self.inspect_target(bounded)
+        if identity is None and self.record["containerId"] is None and not allow_absent:
+            raise ValueError(
+                "unrecorded create outcome requires explicit recovery after Docker activity settles"
+            )
+        self.update("cleanup-required", container_id=identity)
+        if identity is not None:
+            bounded(["rm", "--force", identity], timeout=30)
+        try:
+            descriptor = os.open(
+                "backup.dump", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self._descriptor
+            )
+        except FileNotFoundError:
+            pass
+        else:
+            try:
+                _private(descriptor, 0o444)
+                os.unlink("backup.dump", dir_fd=self._descriptor)
+                os.fsync(self._descriptor)
+            finally:
+                os.close(descriptor)
+        self.update("cleaned")
+        return {"containerRemoved": identity is not None, "containerId": identity}
 
     def close(self) -> None:
         if self._lock is not None:
