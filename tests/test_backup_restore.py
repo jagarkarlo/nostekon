@@ -744,6 +744,35 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
             timeout=10,
         )
         backup = tmp_path / "real.dump"
+        readonly = [
+            "exec",
+            "--env=PGOPTIONS=-c default_transaction_read_only=on "
+            "-c statement_timeout=5000 -c lock_timeout=1000",
+            name,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "nostekon",
+            "--tuples-only",
+            "--no-align",
+            "--set=ON_ERROR_STOP=1",
+            "--command",
+        ]
+        assert (
+            restore.docker_command(
+                [
+                    *readonly,
+                    "SHOW default_transaction_read_only; SHOW statement_timeout; SHOW lock_timeout",
+                ],
+                timeout=10,
+            )
+            == b"on\n5s\n1s\n"
+        )
+        with pytest.raises(RuntimeError, match="database output omitted"):
+            restore.docker_command(
+                [*readonly, "INSERT INTO public.orders VALUES (4,1)"], timeout=10
+            )
         with backup.open("xb") as archive:
             os.fchmod(archive.fileno(), 0o600)
             subprocess.run(
@@ -875,7 +904,9 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
                         "--validation-profile",
                         str(profile_path),
                         "--expect-table",
-                        "public.orders=3",
+                        "public.orders=3"
+                        if scenario in ("missing-table", "restore-error")
+                        else f"{table}=3",
                     ]
                 )
                 == 0
