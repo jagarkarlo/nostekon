@@ -71,8 +71,12 @@ def test_backup_restore_cli_exits_match_evidence(tmp_path, monkeypatch, capsys, 
 
 
 @pytest.mark.parametrize("timeout_args, expected_timeout", [([], 300), (["--timeout", "90"], 90)])
+@pytest.mark.parametrize(
+    "profile_args, profile",
+    [([], None), (["--validation-profile", "profile.json"], Path("profile.json"))],
+)
 def test_backup_plan_cli_creates_plan_without_execution(
-    tmp_path, monkeypatch, capsys, timeout_args, expected_timeout
+    tmp_path, monkeypatch, capsys, timeout_args, expected_timeout, profile_args, profile
 ):
     from nostekon import backup_restore
 
@@ -95,18 +99,43 @@ def test_backup_plan_cli_creates_plan_without_execution(
                 "--expect-table",
                 "public.orders=3",
                 *timeout_args,
+                *profile_args,
             ]
         )
         == 0
     )
+    settings = {"tables": {"public.orders": 3}, "timeout": expected_timeout}
+    if profile is not None:
+        settings["validation_profile"] = profile
     assert captured == [
         (
             Path("backup.dump"),
             tmp_path / "plan.json",
-            {"tables": {"public.orders": 3}, "timeout": expected_timeout},
+            settings,
         )
     ]
     assert "not operator approval" in capsys.readouterr().out
+
+
+def test_profile_cannot_override_a_saved_plan_at_execution(tmp_path):
+    output = tmp_path / "run.json"
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "backup",
+                "restore",
+                "--file",
+                "backup.dump",
+                "--output",
+                str(output),
+                "--plan",
+                "plan.json",
+                "--validation-profile",
+                "profile.json",
+            ]
+        )
+    assert error.value.code == 2
+    assert not output.exists()
 
 
 def test_planned_restore_cli_forwards_only_the_plan(tmp_path, monkeypatch):

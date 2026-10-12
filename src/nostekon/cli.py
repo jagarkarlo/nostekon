@@ -68,11 +68,16 @@ def _cmd_backup_plan(args: argparse.Namespace) -> int:
 
     previous = signal.signal(signal.SIGTERM, interrupt)
     try:
+        settings = {
+            "tables": _backup_expectations(args),
+            "timeout": args.timeout if args.timeout is not None else 300,
+        }
+        if args.validation_profile is not None:
+            settings["validation_profile"] = Path(args.validation_profile)
         create_restore_plan(
             Path(args.file),
             Path(args.output),
-            tables=_backup_expectations(args),
-            timeout=args.timeout if args.timeout is not None else 300,
+            **settings,
         )
         print(f"Recorded restore plan in {args.output}")
         print(
@@ -381,6 +386,9 @@ def build_parser() -> argparse.ArgumentParser:
         "plan", help="bind backup bytes, cached image and expectations without restoring"
     )
     backup_plan.set_defaults(handler=_cmd_backup_plan)
+    backup_plan.add_argument(
+        "--validation-profile", help="strict declarative PostgreSQL profile to freeze in a v2 plan"
+    )
     backup_restore = backup_commands.add_parser(
         "restore", help="restore a PostgreSQL custom archive; no production connection"
     )
