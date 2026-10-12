@@ -258,9 +258,12 @@ func TestRejectsEvidenceDriftAndContradictoryMeasurements(t *testing.T) {
 		{"expected count", "expected 3; measured 3", "expected 2; measured 2"},
 		{"count contradicts flag", "expected 3; measured 3", "expected 3; measured 2"},
 		{"oversize measurement", "expected 3; measured 3", "expected 3; measured 9223372036854775808"},
+		{"malformed count", "expected 3; measured 3", "expected 3; measured unknown"},
 		{"missing count", "Row count: public.orders", "Row count: public.other"},
 		{"rule scope", "not_null: public.orders.id", "not_null: public.other.id"},
 		{"rule contradicts flag", "measured violations: 0", "measured violations: 1"},
+		{"unbounded rule", "measured violations: 0", "measured violations: 9223372036854775808"},
+		{"malformed rule", "measured violations: 0", "measured violations: unknown"},
 		{"extra declaration", `"invariants":["orders-id"]`, `"invariants":["orders-id","extra"]`},
 		{"depth", `"upTo":"V4"`, `"upTo":"V3"`},
 		{"cleanup target", `"detail":"nostekon-backup-aaaaaaaaaaaa"`, `"detail":"nostekon-backup-bbbbbbbbbbbb"`},
@@ -281,6 +284,9 @@ func TestRejectsEvidenceDriftAndContradictoryMeasurements(t *testing.T) {
 			}
 			if review.Passed || review.EvidenceMatches || len(review.Issues) == 0 {
 				t.Fatalf("drift accepted: %+v", review)
+			}
+			if (change.name == "oversize measurement" || change.name == "malformed count" || change.name == "unbounded rule" || change.name == "malformed rule") && review.Complete {
+				t.Fatal("invalid numeric observation was labelled complete")
 			}
 		})
 	}

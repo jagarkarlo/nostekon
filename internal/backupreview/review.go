@@ -287,11 +287,15 @@ func Evaluate(planData, evidenceData []byte) (Review, error) {
 				want, found := restored.Tables[table]
 				counts := countDetail.FindStringSubmatch(check.Detail)
 				if !found || level.ID != "V3" || len(counts) != 3 {
+					missing = true
 					review.Issues = append(review.Issues, "unexpected or malformed table-count check: "+check.Name)
 					continue
 				}
 				expectedCount, expectedErr := strconv.ParseInt(counts[1], 10, 64)
 				measured, measuredErr := strconv.ParseInt(counts[2], 10, 64)
+				if expectedErr != nil || measuredErr != nil {
+					missing = true
+				}
 				if expectedErr != nil || measuredErr != nil || expectedCount != want || check.Passed != (measured == want) {
 					review.Issues = append(review.Issues, "table measurement contradicts its plan or pass flag: "+table)
 				}
@@ -305,15 +309,20 @@ func Evaluate(planData, evidenceData []byte) (Review, error) {
 				prefix := description + "; "
 				measurement := violationDetail.FindStringSubmatch(strings.TrimPrefix(check.Detail, prefix))
 				if level.ID != "V4" || !strings.HasPrefix(check.Detail, prefix) {
+					missing = true
 					review.Issues = append(review.Issues, "semantic rule scope does not match the plan: "+rule.Name)
 					continue
 				}
 				if len(measurement) == 2 {
 					violations, measureErr := strconv.ParseInt(measurement[1], 10, 64)
+					if measureErr != nil {
+						missing = true
+					}
 					if measureErr != nil || check.Passed != (violations == 0) {
 						review.Issues = append(review.Issues, "semantic measurement contradicts its pass flag: "+rule.Name)
 					}
 				} else if check.Passed || check.Detail != prefix+"query failed; no raw database output retained" && check.Detail != prefix+"not evaluated because the rehearsal did not reach validation" {
+					missing = true
 					review.Issues = append(review.Issues, "missing or malformed semantic measurement: "+rule.Name)
 				} else {
 					missing = true
