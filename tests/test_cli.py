@@ -138,6 +138,53 @@ def test_profile_cannot_override_a_saved_plan_at_execution(tmp_path):
     assert not output.exists()
 
 
+@pytest.mark.parametrize("flags,confirmed", [([], False), (["--confirm-cleanup"], True)])
+def test_backup_recovery_cli_is_inspection_only_unless_confirmed(
+    tmp_path, monkeypatch, capsys, flags, confirmed
+):
+    from nostekon import backup_recovery
+
+    calls = []
+
+    def recover(directory, *, confirm_cleanup):
+        calls.append((directory, confirm_cleanup))
+        return {"checkpointStatus": "cleaned" if confirm_cleanup else "cleanup-required"}
+
+    monkeypatch.setattr(backup_recovery, "recover_backup", recover)
+    directory = tmp_path / "run.json.recovery"
+    assert main(["backup", "recover", "--directory", str(directory), *flags]) == 0
+    assert calls == [(directory, confirmed)]
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["checkpointStatus"] == (
+        "cleaned" if confirmed else "cleanup-required"
+    )
+    assert "not restore evidence" in captured.err
+
+
+@pytest.mark.parametrize(
+    "failure,code",
+    [
+        (ValueError("active"), 2),
+        (RuntimeError("Docker unavailable"), 2),
+        (OSError("checkpoint unreadable"), 2),
+        (KeyboardInterrupt(), 130),
+    ],
+)
+def test_backup_recovery_cli_restores_signal_handler(tmp_path, monkeypatch, failure, code):
+    import signal
+
+    from nostekon import backup_recovery
+
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def recover(directory, *, confirm_cleanup):
+        raise failure
+
+    monkeypatch.setattr(backup_recovery, "recover_backup", recover)
+    assert main(["backup", "recover", "--directory", str(tmp_path), "--confirm-cleanup"]) == code
+    assert signal.getsignal(signal.SIGTERM) == previous
+
+
 def test_planned_restore_cli_forwards_only_the_plan(tmp_path, monkeypatch):
     from nostekon import backup_restore
 

@@ -134,6 +134,35 @@ def _cmd_backup_restore(args: argparse.Namespace) -> int:
         signal.signal(signal.SIGTERM, previous)
 
 
+def _cmd_backup_recover(args: argparse.Namespace) -> int:
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt("backup recovery interrupted")
+
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        if sys.platform != "linux":
+            raise ValueError("backup recovery requires Linux and a local Docker daemon")
+        from nostekon.backup_recovery import recover_backup
+
+        review = recover_backup(Path(args.directory), confirm_cleanup=args.confirm_cleanup)
+        print(json.dumps(review, indent=2))
+        print(
+            "Cleanup state only; not restore evidence, incident RTO or RPO. No restore resumed.",
+            file=sys.stderr,
+        )
+        return 0
+    except KeyboardInterrupt:
+        print(
+            "error: recovery interrupted; inspect the checkpoint before retrying", file=sys.stderr
+        )
+        return 130
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _cmd_levels(_: argparse.Namespace) -> int:
     for level, info in LEVELS.items():
         print(f"{level.name}  {info.question:<34}  {info.evidence}")
@@ -410,6 +439,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--plan", help="strict restore plan; no expectation or timeout overrides"
     )
     backup_restore.set_defaults(handler=_cmd_backup_restore)
+    backup_recover = backup_commands.add_parser(
+        "recover", help="inspect a private recovery checkpoint; cleanup requires confirmation"
+    )
+    backup_recover.add_argument(
+        "--directory", required=True, help="original OUTPUT.json.recovery directory"
+    )
+    backup_recover.add_argument(
+        "--confirm-cleanup",
+        action="store_true",
+        help="assert runner and Docker creation have stopped; "
+        "remove only the matching target and snapshot",
+    )
+    backup_recover.set_defaults(handler=_cmd_backup_recover)
 
     lab = commands.add_parser("lab", help="manage and run disposable k3d lab restore drills")
     lab_commands = lab.add_subparsers(dest="lab_command", required=True, metavar="ACTION")
