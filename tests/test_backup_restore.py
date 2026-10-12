@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 from nostekon import backup_restore as restore
+from nostekon.backup_recovery import RecoveryJournal
 
 
 def test_snapshot_preserves_exact_bytes_without_mutating_original(tmp_path):
@@ -56,6 +57,122 @@ def fake_docker(
         return b""
 
     return execute
+
+
+def test_recovery_checkpoint_is_private_durable_and_exclusively_locked(tmp_path):
+    directory = tmp_path / "attempt.recovery"
+    with RecoveryJournal.create(
+        directory, run_id="a" * 32, image_id="sha256:" + "b" * 64
+    ) as journal:
+        recorded = json.loads((directory / "recovery.json").read_text())
+        assert recorded == journal.record
+        assert recorded["status"] == "prepared"
+        assert recorded["containerId"] is None
+        assert recorded["name"] == "nostekon-backup-" + "a" * 12
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+        assert stat.S_IMODE((directory / "recovery.json").stat().st_mode) == 0o600
+        with pytest.raises(ValueError, match="active"), RecoveryJournal.open(directory):
+            pass
+    with RecoveryJournal.open(directory) as journal:
+        assert journal.record == recorded
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"apiVersion": "unknown"},
+        {"kind": "Approval"},
+        {"status": "resume"},
+        {"runId": "x" * 32},
+        {"name": "other-container"},
+        {"imageId": "postgres:latest"},
+        {"containerId": "short"},
+        {"containerId": []},
+        {"status": "running"},
+        {"pid": 123},
+    ],
+)
+def test_recovery_rejects_invalid_or_unknown_metadata(tmp_path, change):
+    directory = tmp_path / "attempt.recovery"
+    with RecoveryJournal.create(
+        directory, run_id="a" * 32, image_id="sha256:" + "b" * 64
+    ) as journal:
+        record = {**journal.record, **change}
+    (directory / "recovery.json").write_text(json.dumps(record))
+    with pytest.raises(ValueError), RecoveryJournal.open(directory):
+        pass
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        "directory-mode",
+        "file-mode",
+        "metadata-symlink",
+        "metadata-hardlink",
+        "metadata-fifo",
+        "lock-symlink",
+        "lock-hardlink",
+        "lock-fifo",
+        "directory-symlink",
+    ],
+)
+def test_recovery_rejects_unsafe_checkpoint_paths(tmp_path, unsafe):
+    directory = tmp_path / "attempt.recovery"
+    with RecoveryJournal.create(directory, run_id="a" * 32, image_id="sha256:" + "b" * 64):
+        pass
+    if unsafe == "directory-mode":
+        directory.chmod(0o755)
+    elif unsafe == "file-mode":
+        (directory / "recovery.json").chmod(0o644)
+    elif unsafe == "directory-symlink":
+        moved = tmp_path / "moved"
+        directory.rename(moved)
+        directory.symlink_to(moved)
+    else:
+        target = directory / ("lock" if unsafe.startswith("lock") else "recovery.json")
+        original = tmp_path / "original"
+        target.rename(original)
+        if unsafe.endswith("symlink"):
+            target.symlink_to(original)
+        elif unsafe.endswith("hardlink"):
+            os.link(original, target)
+        else:
+            os.mkfifo(target)
+    with pytest.raises((OSError, ValueError)), RecoveryJournal.open(directory):
+        pass
+
+
+@pytest.mark.parametrize(
+    "payload", [b"{", b"\xff", b"x" * 4097, b"[" * 1100 + b"]" * 1100, b'{"runId":"a","runId":"b"}']
+)
+def test_recovery_metadata_is_bounded_unambiguous_json(tmp_path, payload):
+    directory = tmp_path / "attempt.recovery"
+    with RecoveryJournal.create(directory, run_id="a" * 32, image_id="sha256:" + "b" * 64):
+        pass
+    (directory / "recovery.json").write_bytes(payload)
+    with pytest.raises(ValueError), RecoveryJournal.open(directory):
+        pass
+
+
+def test_recovery_publication_failure_preserves_previous_checkpoint(tmp_path, monkeypatch):
+    from nostekon import backup_recovery
+
+    directory = tmp_path / "attempt.recovery"
+    with RecoveryJournal.create(
+        directory, run_id="a" * 32, image_id="sha256:" + "b" * 64
+    ) as journal:
+        previous = (directory / "recovery.json").read_bytes()
+
+        def fail(*arguments, **kwargs):
+            raise OSError("publication failed")
+
+        monkeypatch.setattr(backup_recovery.os, "replace", fail)
+        with pytest.raises(OSError, match="publication failed"):
+            journal.update("running", container_id="c" * 64)
+        assert (directory / "recovery.json").read_bytes() == previous
+        assert journal.record["status"] == "prepared"
+        assert list(directory.glob(".recovery-*")) == []
 
 
 def test_plan_binds_exact_backup_and_cached_image_without_restoring(tmp_path, monkeypatch):
