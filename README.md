@@ -445,6 +445,11 @@ image, expectations and timeout. Review the plan first; execution rejects change
 backups and setting overrides. Plans are not signed approvals or proof of identity.
 Use an expected count from the same snapshot. Input is bounded to 64 MiB;
 database storage to 512 MiB. Requested depth is V2 without counts or V3 with them.
+Add `--validation-profile ./profiles/orders-profile.json` during planning for V4:
+strict, bound null/uniqueness/reference rules evaluated with generated read-only
+queries. At least one snapshot-specific count is required; passing proves only
+selected rules, not complete business correctness. Full scopes and measured
+violations remain visible in Studio and its Markdown export.
 Import the recorded JSON into Studio or evaluate it with `nostekon-report`.
 Timing is rehearsal duration, not incident RTO; RPO remains unmeasured without a
 ledger. Direct production access, application readiness and in-place restoration
