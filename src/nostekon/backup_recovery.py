@@ -4,6 +4,7 @@ import json
 import os
 import re
 import stat
+import sys
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -218,6 +219,7 @@ class RecoveryJournal:
         return raw
 
     def cleanup(self, command, *, allow_absent: bool = False) -> dict:
+        self.snapshot_present()
         deadline = time.monotonic() + 30
 
         def bounded(arguments, *, timeout):
@@ -250,6 +252,19 @@ class RecoveryJournal:
         self.update("cleaned")
         return {"containerRemoved": identity is not None, "containerId": identity}
 
+    def snapshot_present(self) -> bool:
+        try:
+            descriptor = os.open(
+                "backup.dump", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self._descriptor
+            )
+        except FileNotFoundError:
+            return False
+        try:
+            _private(descriptor, 0o444)
+            return True
+        finally:
+            os.close(descriptor)
+
     def close(self) -> None:
         if self._lock is not None:
             os.close(self._lock)
@@ -261,3 +276,46 @@ class RecoveryJournal:
 
     def __exit__(self, *arguments):
         self.close()
+
+
+def recover_backup(directory: Path, *, confirm_cleanup: bool = False) -> dict:
+    if sys.platform != "linux":
+        raise ValueError("backup recovery requires Linux and a local Docker daemon")
+    if type(confirm_cleanup) is not bool:
+        raise ValueError("cleanup confirmation must be a boolean")
+    from nostekon.backup_restore import docker_command
+
+    deadline = time.monotonic() + 30
+
+    def command(arguments, *, timeout):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("recovery action deadline exceeded")
+        return docker_command(arguments, timeout=min(timeout, remaining))
+
+    with RecoveryJournal.open(directory) as journal:
+        snapshot = journal.snapshot_present()
+        identity = journal.inspect_target(command)
+        if journal.record["status"] == "cleaned" and (identity is not None or snapshot):
+            raise ValueError(
+                "cleaned checkpoint still has a target or snapshot; manual investigation required"
+            )
+        result = {"containerRemoved": False}
+        if confirm_cleanup and journal.record["status"] != "cleaned":
+            result = journal.cleanup(command, allow_absent=True)
+            snapshot = False
+            identity = None
+        return {
+            "apiVersion": "nostekon/backup-recovery-review/v1alpha1",
+            "kind": "PostgreSQLBackupRecoveryReview",
+            "runId": journal.record["runId"],
+            "name": journal.record["name"],
+            "imageId": journal.record["imageId"],
+            "containerId": journal.record["containerId"],
+            "observedContainerId": identity,
+            "checkpointStatus": journal.record["status"],
+            "containerPresent": identity is not None,
+            "snapshotPresent": snapshot,
+            "containerRemoved": result["containerRemoved"],
+            "cleanupConfirmed": confirm_cleanup,
+        }

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 
+from nostekon import backup_recovery as recovery
 from nostekon import backup_restore as restore
 from nostekon.backup_recovery import RecoveryJournal
 
@@ -289,6 +291,156 @@ def test_cleanup_refuses_changed_target_ownership(tmp_path, monkeypatch, change)
         for check in run["status"]["checks"]
     )
     assert (tmp_path / "run.json.recovery" / "backup.dump").exists()
+
+
+def test_recovery_inspection_is_read_only_and_confirmed_cleanup_is_idempotent(
+    tmp_path, monkeypatch
+):
+    commands = []
+    delegate = fake_docker(commands)
+
+    def fail_cleanup(arguments, *, timeout):
+        if arguments[0] == "rm":
+            raise RuntimeError("controlled removal failure")
+        return delegate(arguments, timeout=timeout)
+
+    monkeypatch.setattr(restore, "docker_command", fail_cleanup)
+    source = tmp_path / "source.dump"
+    source.write_bytes(b"PGDMPfixture")
+    output = tmp_path / "run.json"
+    restore.execute_backup_restore(source, output)
+    previous_evidence = output.read_bytes()
+    directory = tmp_path / "run.json.recovery"
+    previous_checkpoint = (directory / "recovery.json").read_bytes()
+    monkeypatch.setattr(restore, "docker_command", delegate)
+    commands.clear()
+    review = recovery.recover_backup(directory)
+    assert review["checkpointStatus"] == "cleanup-required"
+    assert review["containerPresent"] is True
+    assert review["snapshotPresent"] is True
+    assert all(command[0] in ("ps", "inspect") for command in commands)
+    assert (directory / "recovery.json").read_bytes() == previous_checkpoint
+    assert output.read_bytes() == previous_evidence
+    result = recovery.recover_backup(directory, confirm_cleanup=True)
+    assert result["checkpointStatus"] == "cleaned"
+    assert result["containerRemoved"] is True
+    assert commands[-1] == ["rm", "--force", "c" * 64]
+    assert output.read_bytes() == previous_evidence
+    assert source.read_bytes() == b"PGDMPfixture"
+    assert not (directory / "backup.dump").exists()
+    commands.clear()
+    again = recovery.recover_backup(directory, confirm_cleanup=True)
+    assert again["containerRemoved"] is False
+    assert not any(command[0] == "rm" for command in commands)
+
+
+def test_recovery_of_active_runner_does_not_call_docker(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    directory = tmp_path / "attempt.recovery"
+    with (
+        RecoveryJournal.create(directory, run_id="a" * 32, image_id="sha256:" + "b" * 64),
+        pytest.raises(ValueError, match="active"),
+    ):
+        recovery.recover_backup(directory, confirm_cleanup=True)
+    assert commands == []
+
+
+def test_prepared_recovery_requires_confirmation_to_remove_snapshot(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    directory = tmp_path / "attempt.recovery"
+    with RecoveryJournal.create(directory, run_id="a" * 32, image_id="sha256:" + "b" * 64):
+        snapshot = directory / "backup.dump"
+        snapshot.write_bytes(b"PGDMPfixture")
+        snapshot.chmod(0o444)
+    assert recovery.recover_backup(directory)["snapshotPresent"] is True
+    assert snapshot.exists()
+    assert recovery.recover_backup(directory, confirm_cleanup=True)["checkpointStatus"] == "cleaned"
+    assert not snapshot.exists()
+    assert not any(command[0] == "rm" for command in commands)
+
+
+def test_unrecorded_create_is_adopted_only_after_full_ownership_validation(tmp_path, monkeypatch):
+    commands = []
+    execute = fake_docker(commands)
+    monkeypatch.setattr(restore, "docker_command", execute)
+    directory = tmp_path / "attempt.recovery"
+    with RecoveryJournal.create(
+        directory, run_id="a" * 32, image_id="sha256:" + "a" * 64
+    ) as journal:
+        identity = execute(
+            [
+                "create",
+                "--name",
+                journal.record["name"],
+                "--label=io.nostekon.purpose=backup-rehearsal",
+                "--label=io.nostekon.run-id=" + "a" * 32,
+                f"--label=io.nostekon.journal={journal.binding}",
+                journal.record["imageId"],
+            ],
+            timeout=30,
+        ).decode()
+    before = (directory / "recovery.json").read_bytes()
+    review = recovery.recover_backup(directory)
+    assert review["containerId"] is None
+    assert review["observedContainerId"] == identity
+    assert (directory / "recovery.json").read_bytes() == before
+    result = recovery.recover_backup(directory, confirm_cleanup=True)
+    assert result["containerId"] == identity
+    assert result["containerRemoved"] is True
+    assert commands[-1] == ["rm", "--force", identity]
+
+
+def test_copied_checkpoint_cannot_remove_the_original_target(tmp_path, monkeypatch):
+    commands = []
+    delegate = fake_docker(commands)
+
+    def fail_cleanup(arguments, *, timeout):
+        if arguments[0] == "rm":
+            raise RuntimeError("controlled removal failure")
+        return delegate(arguments, timeout=timeout)
+
+    monkeypatch.setattr(restore, "docker_command", fail_cleanup)
+    source = tmp_path / "source.dump"
+    source.write_bytes(b"PGDMPfixture")
+    restore.execute_backup_restore(source, tmp_path / "run.json")
+    original = tmp_path / "run.json.recovery"
+    copied = tmp_path / "copied.recovery"
+    shutil.copytree(original, copied)
+    monkeypatch.setattr(restore, "docker_command", delegate)
+    commands.clear()
+    with pytest.raises(ValueError, match="ownership"):
+        recovery.recover_backup(copied, confirm_cleanup=True)
+    assert not any(command[0] == "rm" for command in commands)
+    assert (original / "backup.dump").exists()
+    assert (copied / "backup.dump").exists()
+
+
+@pytest.mark.parametrize("unsafe", ["symlink", "fifo", "mode", "hardlink"])
+def test_unsafe_recovery_snapshot_is_rejected_before_docker(tmp_path, monkeypatch, unsafe):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    directory = tmp_path / "attempt.recovery"
+    with RecoveryJournal.create(directory, run_id="a" * 32, image_id="sha256:" + "b" * 64):
+        pass
+    source = tmp_path / "source.dump"
+    source.write_bytes(b"PGDMPfixture")
+    source.chmod(0o444)
+    snapshot = directory / "backup.dump"
+    if unsafe == "symlink":
+        snapshot.symlink_to(source)
+    elif unsafe == "fifo":
+        os.mkfifo(snapshot)
+    elif unsafe == "hardlink":
+        os.link(source, snapshot)
+    else:
+        snapshot.write_bytes(b"PGDMPfixture")
+        snapshot.chmod(0o644)
+    with pytest.raises((OSError, ValueError)):
+        recovery.recover_backup(directory, confirm_cleanup=True)
+    assert commands == []
+    assert source.read_bytes() == b"PGDMPfixture"
 
 
 def test_plan_binds_exact_backup_and_cached_image_without_restoring(tmp_path, monkeypatch):
