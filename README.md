@@ -472,6 +472,25 @@ go build -o /tmp/nostekon-report ./cmd/nostekon-report
 /tmp/nostekon-report --backup-plan plans/orders-plan.json evidence/orders-rehearsal.run.json
 ```
 
+Studio's **Plan review** tab uses the same independent Go gate in the browser or
+installed app. Attach the original plan, inspect completeness/binding separately
+from pass/fail, and export/import an exact-original plan/run/review ZIP. Imports
+verify integrity and calculate a fresh unverified review; cached verdicts never
+grant trust. Native offline portability is also available:
+
+```bash
+umask 077
+set -o noclobber
+/tmp/nostekon-report --backup-plan plans/orders-plan.json --export-backup-bundle \
+  evidence/orders-rehearsal.run.json > evidence/orders.backup-review.zip
+/tmp/nostekon-report --backup-bundle evidence/orders.backup-review.zip
+```
+
+ZIP export retains gate exits (`0` pass, `1` valid failed/incomplete capture with
+a valid ZIP, `2` admission/write error). Discard any partial redirected output
+after an error. The bounded four-entry bundle contains no backup dump or recovery
+checkpoint; checksums are not authentication. See the guide below for limits.
+
 The gate checks the canonical plan binding, archive/image identities, selected
 counts and semantic scopes/measurements, required cleanup and recorded pass flags.
 It returns JSON plus exit `0` for a passing gate, `1` for a failed/incomplete or

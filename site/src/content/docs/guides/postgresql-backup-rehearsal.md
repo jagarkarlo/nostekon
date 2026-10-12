@@ -299,13 +299,67 @@ Formatting can change the plan file digest without changing canonical identity.
 These are consistency checks, not signatures, approval or authenticated capture;
 provenance remains `unverified`. Independently review the plan with the backup
 owner. A party able to forge both plan and evidence can forge consistent claims.
-Studio imports the original DrillRun, not this gate JSON; signature verification
-is a separate operation and does not establish runner truth.
+Studio's **Plan review** tab attaches the original plan to the original DrillRun;
+do not import the gate JSON as evidence. Signature verification is a separate
+operation and does not establish runner truth.
 
 The synthetic backup CI job retains only original plans, captures and independent
 reviews for seven days, including expected failed scenarios. Dumps, recovery
 snapshots, locks and raw database output are excluded. Hosted execution must be
 checked separately; local tests do not establish a passing hosted run.
+
+## Review in Studio and share a portable bundle
+
+Verified locally on 2026-10-12 in the static browser/WASM engine and installed Go
+app, at desktop and mobile widths. Import the captured DrillRun in Report, open
+**Plan review**, and **Attach plan**. The independent gate shows three separate
+states: pass/fail, complete/incomplete measurements, and matching/mismatched plan
+claims. Changing either original invalidates the previous review. Original plan,
+evidence and fresh review downloads remain available; no database is contacted.
+
+**Export backup bundle** produces a portable ZIP with exactly four known entries:
+`manifest.json`, `plan.json`, `run.json`, and `review.json`. The manifest records
+SHA-256 and byte lengths for the three documents. Plan/run bytes are preserved,
+including whitespace. Failed and incomplete captures can be shared; exporting
+does not turn their gate into a pass. No dump, recovery snapshot, checkpoint,
+private key, credential or raw database output is added by the exporter.
+
+**Import backup bundle** verifies the inventory, sizes and checksums, then
+evaluates the original plan/run again. The cached review is never authoritative:
+even a forged passing receipt with updated checksums cannot upgrade the fresh
+verdict or provenance. Import does not grant signature trust or save anything
+automatically. The plan attachment lasts only in the current Report workspace;
+export a bundle to carry both originals across reloads or browser origins.
+
+The native report binary supports the same offline round-trip. Use a new output
+filename; the Bash shell below prevents overwrites and creates private files:
+
+```bash
+umask 077
+set -o noclobber
+/tmp/nostekon-report --backup-plan ./plans/orders-semantic-plan.json \
+  --export-backup-bundle ./evidence/orders-semantic-rehearsal.run.json \
+  > ./evidence/orders.backup-review.zip
+/tmp/nostekon-report --backup-bundle ./evidence/orders.backup-review.zip
+```
+
+Export writes binary ZIP to stdout, not JSON. Its exit status remains the gate
+status: `0` pass, `1` valid failed/incomplete/mismatched capture (a valid ZIP is
+still written), `2` admission or output error. A redirect can leave an empty or
+partial file on error; discard that file, do not treat its existence as success.
+Bundle import emits a freshly calculated JSON review with the same exit codes.
+These modes cannot mix suite, attestation or Pushgateway flags.
+
+Admission permits only uncompressed regular ZIP entries with unique known names;
+no paths are extracted. ZIP directory metadata is checked before allocating
+entries and is limited to four records within 4 KiB; ZIP64, multiple disks,
+archive comments and trailing bytes are rejected. Total archive size is limited
+to 20 MiB, plan to 16 KiB,
+run to 16 MiB, cached review to 2 MiB, and manifest to 16 KiB. The browser preserves
+valid UTF-8 originals and rejects lossy file decoding. Checksums establish
+integrity and consistency, **not authenticity**: a party able to forge both
+originals can still forge consistent claims. Backup-owner approval and independent
+capture remain separate requirements.
 
 ## Cleanup and failure handling
 
