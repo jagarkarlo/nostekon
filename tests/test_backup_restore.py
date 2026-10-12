@@ -38,7 +38,9 @@ def test_bad_or_oversized_backup_leaves_no_snapshot(tmp_path, monkeypatch, paylo
     assert list(workspace.iterdir()) == []
 
 
-def fake_docker(commands, *, fail_restore=False, fail_cleanup=False, count=b"3\n"):
+def fake_docker(
+    commands, *, fail_restore=False, fail_cleanup=False, count=b"3\n", invariant_count=None
+):
     def execute(arguments, *, timeout):
         commands.append(arguments)
         if arguments[:2] == ["image", "inspect"]:
@@ -48,6 +50,8 @@ def fake_docker(commands, *, fail_restore=False, fail_cleanup=False, count=b"3\n
         if "pg_restore" in arguments and "--exit-on-error" in arguments and fail_restore:
             raise subprocess.CalledProcessError(1, "docker")
         if "psql" in arguments:
+            if invariant_count is not None and " WHERE " in arguments[-1]:
+                return invariant_count
             return count if "count(*)" in arguments[-1] else b"1\n"
         return b""
 
@@ -195,7 +199,9 @@ def test_validation_profile_is_frozen_inside_v2_plan_without_execution(tmp_path,
     profile = validation_profile()
     profile_path.write_text(json.dumps(profile))
     output = tmp_path / "plan.json"
-    plan = restore.create_restore_plan(backup, output, validation_profile=profile_path)
+    plan = restore.create_restore_plan(
+        backup, output, tables={"public.orders": 3}, validation_profile=profile_path
+    )
     assert plan["apiVersion"] == "nostekon/restore-plan/v2alpha1"
     assert plan["invariants"] == profile["invariants"]
     profile_path.write_text("{}")
@@ -267,7 +273,9 @@ def test_v2_plan_loader_revalidates_embedded_rules(tmp_path, monkeypatch):
     profile = tmp_path / "profile.json"
     profile.write_text(json.dumps(validation_profile()))
     output = tmp_path / "plan.json"
-    plan = restore.create_restore_plan(backup, output, validation_profile=profile)
+    plan = restore.create_restore_plan(
+        backup, output, tables={"public.orders": 3}, validation_profile=profile
+    )
     plan["invariants"][0]["column"] = "id; SELECT 1"
     output.write_text(json.dumps(plan))
     with pytest.raises(ValueError):
@@ -282,7 +290,9 @@ def semantic_plan(tmp_path, monkeypatch):
     profile = tmp_path / "profile.json"
     profile.write_text(json.dumps(validation_profile()))
     plan = tmp_path / "plan.json"
-    restore.create_restore_plan(backup, plan, validation_profile=profile)
+    restore.create_restore_plan(
+        backup, plan, tables={"public.orders": 3}, validation_profile=profile
+    )
     return backup, plan
 
 
@@ -291,7 +301,7 @@ def test_semantic_checks_use_read_only_generated_queries(
     tmp_path, monkeypatch, semantic_plan, count, passed
 ):
     commands = []
-    monkeypatch.setattr(restore, "docker_command", fake_docker(commands, count=count))
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands, invariant_count=count))
     backup, plan = semantic_plan
     run = restore.execute_backup_restore(backup, tmp_path / "run.json", plan=plan)
     expected = [rule["name"] for rule in validation_profile()["invariants"]]
@@ -301,7 +311,7 @@ def test_semantic_checks_use_read_only_generated_queries(
     assert [check["name"] for check in checks] == expected
     assert all(check["passed"] == passed for check in checks)
     assert all("measured violations: " in check["detail"] for check in checks)
-    queries = [command for command in commands if "psql" in command and "count(*)" in command[-1]]
+    queries = [command for command in commands if "psql" in command and " WHERE " in command[-1]]
     assert len(queries) == 3
     for command in queries:
         assert (
@@ -316,11 +326,29 @@ def test_semantic_checks_use_read_only_generated_queries(
     assert commands[-1][0:2] == ["rm", "--force"]
 
 
+def test_semantic_plans_require_structural_expectations_before_effects(
+    tmp_path, monkeypatch, semantic_plan
+):
+    backup, plan = semantic_plan
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    output = tmp_path / "incomplete-plan.json"
+    with pytest.raises(ValueError, match="table-count expectation"):
+        restore.create_restore_plan(backup, output, validation_profile=tmp_path / "profile.json")
+    assert commands == []
+    assert not output.exists()
+    payload = json.loads(plan.read_text())
+    payload["tables"] = {}
+    plan.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="table-count expectation"):
+        restore.load_restore_plan(plan)
+
+
 @pytest.mark.parametrize("response", [b"NaN", b"-1", b"1\n2", b"9223372036854775808"])
 def test_malformed_invariant_results_fail_without_retaining_output(
     tmp_path, monkeypatch, semantic_plan, response
 ):
-    monkeypatch.setattr(restore, "docker_command", fake_docker([], count=response))
+    monkeypatch.setattr(restore, "docker_command", fake_docker([], invariant_count=response))
     backup, plan = semantic_plan
     run = restore.execute_backup_restore(backup, tmp_path / "run.json", plan=plan)
     checks = [check for check in run["status"]["checks"] if check["level"] == "V4"]
@@ -340,7 +368,7 @@ def test_invariant_query_errors_are_sanitized_and_other_rules_continue(
     tmp_path, monkeypatch, semantic_plan, failure
 ):
     commands = []
-    delegate = fake_docker(commands, count=b"0\n")
+    delegate = fake_docker(commands, invariant_count=b"0\n")
 
     def execute(arguments, *, timeout):
         if "psql" in arguments and arguments[-1].endswith('"id" IS NULL'):
@@ -364,7 +392,7 @@ def test_interrupted_invariants_retain_matching_failed_declarations(
     delegate = fake_docker(commands)
 
     def execute(arguments, *, timeout):
-        if "psql" in arguments and "count(*)" in arguments[-1]:
+        if "psql" in arguments and " WHERE " in arguments[-1]:
             raise KeyboardInterrupt
         return delegate(arguments, timeout=timeout)
 
@@ -704,8 +732,14 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
                 "-v",
                 "ON_ERROR_STOP=1",
                 "-c",
-                "CREATE TABLE public.orders(id integer PRIMARY KEY); "
-                "INSERT INTO public.orders VALUES (1),(2),(3);",
+                "CREATE TABLE public.orders(id integer PRIMARY KEY, customer_id integer); "
+                "INSERT INTO public.orders VALUES (1,1),(2,2),(3,NULL); "
+                "CREATE TABLE public.customers(id integer PRIMARY KEY); "
+                "INSERT INTO public.customers VALUES (1),(2); "
+                "CREATE TABLE public.orders_bad(id integer, customer_id integer); "
+                "INSERT INTO public.orders_bad VALUES (1,99),(1,1),(NULL,NULL); "
+                "CREATE TABLE public.nullable(id integer, customer_id integer); "
+                "INSERT INTO public.nullable VALUES (NULL,NULL),(NULL,NULL),(NULL,NULL);",
             ],
             timeout=10,
         )
@@ -808,6 +842,74 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
                 for check in recorded["status"]["checks"]
             )
             planned_runs.append((planned_output, exit_code, verdict))
+        semantic_runs = []
+        for scenario, table, exit_code in [
+            ("good", "public.orders", 0),
+            ("violations", "public.orders_bad", 1),
+            ("nulls-ignored", "public.nullable", 0),
+            ("missing-table", "public.missing", 1),
+            ("restore-error", "public.orders", 1),
+        ]:
+            profile = validation_profile()
+            for rule in profile["invariants"]:
+                rule["table"] = table
+            if scenario == "nulls-ignored":
+                profile["invariants"] = profile["invariants"][1:]
+            profile_path = tmp_path / f"{scenario}-profile.json"
+            profile_path.write_text(json.dumps(profile))
+            plan_path = tmp_path / f"{scenario}-plan.json"
+            run_path = tmp_path / f"{scenario}-v4.json"
+            source = backup
+            if scenario == "restore-error":
+                source = tmp_path / "truncated.dump"
+                source.write_bytes(backup.read_bytes()[:32])
+            assert (
+                main(
+                    [
+                        "backup",
+                        "plan",
+                        "--file",
+                        str(source),
+                        "--output",
+                        str(plan_path),
+                        "--validation-profile",
+                        str(profile_path),
+                        "--expect-table",
+                        "public.orders=3",
+                    ]
+                )
+                == 0
+            )
+            assert (
+                main(
+                    [
+                        "backup",
+                        "restore",
+                        "--file",
+                        str(source),
+                        "--output",
+                        str(run_path),
+                        "--plan",
+                        str(plan_path),
+                    ]
+                )
+                == exit_code
+            )
+            recorded = json.loads(run_path.read_text())
+            checks = [check for check in recorded["status"]["checks"] if check["level"] == "V4"]
+            assert [check["name"] for check in checks] == [
+                rule["name"] for rule in profile["invariants"]
+            ]
+            assert all(check["passed"] == (exit_code == 0) for check in checks)
+            if scenario in ("good", "violations", "nulls-ignored"):
+                violations = 1 if scenario == "violations" else 0
+                assert all(
+                    f"measured violations: {violations}; expected 0" in check["detail"]
+                    for check in checks
+                )
+            if scenario == "restore-error":
+                assert all("not evaluated" in check["detail"] for check in checks)
+            semantic_runs.append((run_path, exit_code, "failed" if exit_code else "verified"))
         backup.write_bytes(backup.read_bytes() + b"changed after planning")
         rejected_output = tmp_path / "rejected.json"
         assert (
@@ -838,6 +940,7 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
             (passing, 0, "verified"),
             (failing, 1, "failed"),
             *planned_runs,
+            *semantic_runs,
         ]:
             evaluation = subprocess.run(
                 [str(report_binary), str(source)], capture_output=True, timeout=15
@@ -845,7 +948,9 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
             assert evaluation.returncode == exit_code, evaluation.stderr.decode()
             report = json.loads(evaluation.stdout)
             assert report["verdict"] == verdict
-            assert report["requestedLevel"] == "V3"
+            assert report["requestedLevel"] == (
+                "V4" if (source, exit_code, verdict) in semantic_runs else "V3"
+            )
             assert report["rpo"] is None
             assert report["provenance"]["status"] == "unverified"
             container = json.loads(source.read_text())["metadata"]["name"]

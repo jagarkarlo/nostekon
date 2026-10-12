@@ -167,6 +167,8 @@ def _validate_plan(plan) -> dict:
     _restore_settings(plan["tables"], plan["timeoutSeconds"])
     if "invariants" in plan:
         _validate_invariants(plan["invariants"])
+        if not plan["tables"]:
+            raise ValueError("semantic validation requires at least one table-count expectation")
     return plan
 
 
@@ -226,6 +228,8 @@ def create_restore_plan(
     invariants = (
         load_validation_profile(validation_profile) if validation_profile is not None else None
     )
+    if invariants is not None and not tables:
+        raise ValueError("semantic validation requires at least one table-count expectation")
     with tempfile.TemporaryDirectory(prefix="nostekon-plan-") as directory:
         snapshot = snapshot_backup(backup, Path(directory))
         with snapshot.open("rb") as handle:
