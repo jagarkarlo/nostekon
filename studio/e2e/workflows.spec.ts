@@ -24,6 +24,103 @@ function evidenceArchive(files: Awaited<ReturnType<typeof suiteBundle>>) {
 }
 
 for (const width of [390, 1440]) {
+  test(`independent backup plan gate and portable originals round-trip at ${width}px`, async ({ page }, testInfo) => {
+    const planPath = new URL("./postgresql-semantic-rehearsal.plan.json", import.meta.url);
+    const runPath = new URL("./postgresql-semantic-rehearsal.run.json", import.meta.url);
+    const [plan, evidence] = await Promise.all([readFile(planPath), readFile(runPath)]);
+    const root = new URL("../../", import.meta.url);
+    let native = "";
+    try { execFileSync("go", ["run", "./cmd/nostekon-report", "--backup-plan", planPath.pathname, runPath.pathname], { cwd: root }); }
+    catch (error) { native = (error as { stdout: Buffer }).stdout.toString(); }
+    const expected = JSON.parse(native);
+    expect(expected).toMatchObject({ passed: false, complete: true, evidenceMatches: true });
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(process.env.NOSTEKON_APP_URL ? "/#/report" : "/demo/#/report");
+    await page.getByTestId("evidence-input").setInputFiles({ name: "failed.run.json", mimeType: "application/json", buffer: evidence });
+    await expect(page.locator(".verdict.failed")).toBeVisible();
+    await page.getByRole("tab", { name: "Plan review", exact: true }).click();
+    await page.getByTestId("backup-plan-input").setInputFiles({ name: "reviewed.plan.json", mimeType: "application/json", buffer: plan });
+    const gate = page.getByRole("status", { name: "Backup plan gate" });
+    await expect(gate).toContainText("Failed");
+    await expect(gate).toContainText("Complete");
+    await expect(gate).toContainText("Matches");
+    await expect(gate).toContainText("Unauthenticated provenance");
+    await expect(gate).toContainText(expected.planSHA256);
+    const reviewDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download independent backup review", exact: true }).click();
+    expect(JSON.parse((await readFile((await (await reviewDownload).path())!)).toString())).toEqual(expected);
+    const archiveDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export backup bundle", exact: true }).click();
+    const archive = await readFile((await (await archiveDownload).path())!);
+    const entries = unzipSync(archive);
+    expect(Object.keys(entries).sort()).toEqual(["manifest.json", "plan.json", "review.json", "run.json"]);
+    expect(Buffer.from(entries["plan.json"])).toEqual(plan);
+    expect(Buffer.from(entries["run.json"])).toEqual(evidence);
+    expect(JSON.parse(Buffer.from(entries["review.json"]).toString())).toEqual(expected);
+    const manifest = JSON.parse(Buffer.from(entries["manifest.json"]).toString());
+    for (const name of ["plan.json", "run.json", "review.json"]) {
+      expect(manifest.files[name]).toEqual({ bytes: entries[name].length, sha256: createHash("sha256").update(entries[name]).digest("hex") });
+    }
+    const forged = Buffer.from(JSON.stringify({ ...expected, passed: true, provenance: { status: "verified" } }));
+    entries["review.json"] = forged;
+    manifest.files["review.json"] = { bytes: forged.length, sha256: createHash("sha256").update(forged).digest("hex") };
+    entries["manifest.json"] = Buffer.from(JSON.stringify(manifest));
+    await page.getByRole("button", { name: "Remove restore plan", exact: true }).click();
+    await expect(gate).toHaveCount(0);
+    await page.getByTestId("backup-bundle-input").setInputFiles({ name: "forged-review.zip", mimeType: "application/zip", buffer: Buffer.from(zipSync(entries, { level: 0 })) });
+    await expect(page.getByRole("tab", { name: "Plan review", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(gate).toContainText("Failed");
+    await expect(gate).toContainText("Unauthenticated provenance");
+    await page.getByRole("tab", { name: "Evidence JSON", exact: true }).click();
+    await expect(page.locator(".backup-review-result:visible")).toHaveCount(0);
+    await page.getByRole("tab", { name: "Plan review", exact: true }).click();
+    await expect(gate).toContainText("Complete");
+    for (const theme of ["dark", "light"]) {
+      if (await page.locator("html").getAttribute("data-theme") !== theme) await page.locator("[data-theme-toggle]").click();
+      await page.screenshot({ path: testInfo.outputPath(`backup-plan-gate-${width}-${theme}.png`), fullPage: true });
+      const bounds = await page.locator(".backup-workbench").boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      expect(await page.locator(".backup-workbench").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await page.locator(".backup-hashes code").evaluateAll(elements => elements.every(element => element.getBoundingClientRect().right <= innerWidth))).toBe(true);
+    }
+    await page.getByTestId("backup-plan-input").setInputFiles({ name: "invalid.plan.json", mimeType: "application/json", buffer: Buffer.from("{}") });
+    await expect(gate).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Export backup bundle", exact: true })).toBeDisabled();
+    await expect(page.locator(".backup-workbench [role=alert]")).toBeVisible();
+    await page.getByTestId("backup-plan-input").setInputFiles({ name: "oversized.plan.json", mimeType: "application/json", buffer: Buffer.alloc(16385, 32) });
+    await expect(page.locator(".backup-workbench [role=alert]")).toContainText("16384 bytes");
+    const altered = JSON.parse(plan.toString()); altered.tables["public.orders_bad"] = 4;
+    await page.getByTestId("backup-plan-input").setInputFiles({ name: "different.plan.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(altered)) });
+    await expect(gate).toContainText("Mismatch");
+    await expect(gate).toContainText("Failed");
+    await page.getByRole("tab", { name: "Report", exact: true }).click();
+    await expect(page.locator(".verdict.failed")).toBeVisible();
+    await page.getByRole("tab", { name: "Plan review", exact: true }).click();
+    await page.getByTestId("backup-bundle-input").setInputFiles({ name: "broken.zip", mimeType: "application/zip", buffer: Buffer.from("not a zip") });
+    await expect(page.locator(".backup-workbench [role=alert]")).toBeVisible();
+    await expect(gate).toHaveCount(0);
+    await page.getByTestId("backup-plan-input").setInputFiles({ name: "reviewed.plan.json", mimeType: "application/json", buffer: plan });
+    await expect(gate).toContainText("Failed");
+    const consistent = JSON.parse(evidence.toString());
+    for (const check of consistent.status.checks) if (check.level === "V4") { check.passed = true; check.detail = check.detail.replace("violations: 1", "violations: 0"); }
+    await page.getByTestId("evidence-input").setInputFiles({ name: "synthetic-passing.run.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(consistent)) });
+    await expect(page.locator(".verdict.verified")).toBeVisible();
+    await page.getByRole("tab", { name: "Plan review", exact: true }).click();
+    await expect(gate).toContainText("Passed");
+    await expect(gate).toContainText("Complete");
+    await expect(gate).toContainText("Unauthenticated provenance");
+    const missing = consistent.status.checks.find((check: { name: string }) => check.name === "orders-id-required");
+    missing.passed = false; missing.detail = "not_null: public.orders_bad.id; query failed; no raw database output retained";
+    await page.getByTestId("evidence-input").setInputFiles({ name: "synthetic-unmeasured.run.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(consistent)) });
+    await expect(page.locator(".verdict.failed")).toBeVisible();
+    await page.getByRole("tab", { name: "Plan review", exact: true }).click();
+    await expect(gate).toContainText("Failed");
+    await expect(gate).toContainText("Incomplete");
+    await expect(gate).toContainText("Matches");
+    await expect(page.getByRole("button", { name: "Export backup bundle", exact: true })).toBeEnabled();
+  });
+
   test(`grouped footer has working product, source, docs and legal destinations at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");

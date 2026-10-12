@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { browserDemo, request } from "./api";
+import { BackupWorkbench } from "./BackupWorkbench";
+import { readOriginalJSON } from "./backupReview";
 import { TrustWorkbench } from "./TrustWorkbench";
 import { CodeEditor } from "./CodeEditor";
 import type { CodeEditorHandle } from "./CodeEditor";
@@ -47,7 +49,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
   const [problems, setProblems] = useState<string[]>([]);
   const [requestError, setRequestError] = useState("");
   const [isBuilding, setIsBuilding] = useState(false);
-  const [tab, setTab] = useState<"report" | "evidence">("report");
+  const [tab, setTab] = useState<"report" | "evidence" | "plan">("report");
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -64,7 +66,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
   const inspection = useMemo(() => inspectJSON(source), [source]);
 
   const build = useCallback(
-    async (text: string, current = ++generation.current, serverAttestation = "") => {
+    async (text: string, current = ++generation.current, serverAttestation = "", showReport = true) => {
       setIsBuilding(true);
       setRequestError("");
       setSaved(false);
@@ -78,12 +80,12 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
           setReport(payload);
           setBuiltFrom(text);
           setProblems([]);
-          setTab("report");
+          if (showReport) setTab("report");
           return;
         }
         const errors = (payload as { errors?: unknown }).errors;
         setProblems(Array.isArray(errors) ? errors.filter((item): item is string => typeof item === "string") : [`HTTP ${response.status}`]);
-        setTab("evidence");
+        if (showReport) setTab("evidence");
       } catch (error) {
         if (current !== generation.current) return;
         onReachability(false);
@@ -233,16 +235,20 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
               setSourceError("DrillRun exceeds the API's 16 MiB request limit.");
               return;
             }
-            if (file)
-              void file.text().then((text) => {
+            if (file) {
+              const current = ++generation.current;
+              setIsBuilding(false);
+              void readOriginalJSON(file, 16 * 1024 * 1024).then((text) => {
+                if (current !== generation.current) return;
                 setSourceError("");
                 setSource(text);
                 setSampleId("");
                 setArchiveResult(""); setImportedKey(undefined);
                 setAttestation("");
                 setAttestationName("");
-                void build(text);
-              }).catch(() => setSourceError("Could not read the selected file."));
+                void build(text, current);
+              }).catch(reason => { if (current === generation.current) setSourceError(reason instanceof Error ? reason.message : "Could not read the selected file."); });
+            }
           }}
         />
         <input
@@ -292,13 +298,14 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
       </aside>
 
       <section className="report-main" aria-label="Drill report">
-        <div className="report-tabs" role="tablist" aria-label="Report or evidence">
+        <div className="report-tabs" role="tablist" aria-label="Report views">
               <button type="button" role="tab" aria-selected={tab === "report"} onClick={() => setTab("report")}>
             Report
           </button>
               <button type="button" role="tab" aria-selected={tab === "evidence"} onClick={() => setTab("evidence")}>
             Evidence JSON {problems.length > 0 && <span className="tab-badge">{problems.length}</span>}
           </button>
+          <button type="button" role="tab" aria-selected={tab === "plan"} onClick={() => setTab("plan")}>Plan review</button>
           <div className="report-actions">
             {stale && <span className="stale-inline">Evidence edited</span>}
             <button className="tool" type="button" disabled={!report || stale || isBuilding || importingArchive || saving || saved} onClick={() => void save()} title="Save original evidence, attached attestation and report in this browser"><Save size={15} /> {saved ? "Saved" : saving ? "Saving..." : "Save run"}</button>
@@ -320,7 +327,14 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
         {attestationName && <p className="workspace-label">{attestationName}</p>}
         {sourceError && <div className="banner bad" role="alert"><XCircle size={15} /> {sourceError}</div>}
 
-        {tab === "evidence" ? (
+        <div hidden={tab !== "plan"}>
+          <BackupWorkbench evidence={source} onImport={text => {
+            setSource(text); setSampleId(""); setSourceError(""); setAttestation(""); setAttestationName(""); setArchiveResult(""); setImportedKey(undefined);
+            void build(text, undefined, "", false);
+          }} />
+        </div>
+
+        {tab === "plan" ? null : tab === "evidence" ? (
           <div className="evidence-pane">
             {problems.length > 0 && (
               <ul className="findings evidence-problems">
