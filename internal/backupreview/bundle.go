@@ -3,6 +3,7 @@ package backupreview
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +81,9 @@ func ReadBundle(data []byte) (ImportedBundle, error) {
 	if len(data) == 0 || len(data) > MaxBundleBytes {
 		return ImportedBundle{}, errors.New("backup bundle must be nonempty and within 20 MiB")
 	}
+	if !boundedBundleDirectory(data) {
+		return ImportedBundle{}, errors.New("backup bundle requires a bounded four-entry single-disk ZIP directory with no trailing bytes")
+	}
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return ImportedBundle{}, err
@@ -145,4 +149,31 @@ func ReadBundle(data []byte) (ImportedBundle, error) {
 		return ImportedBundle{}, err
 	}
 	return ImportedBundle{Plan: files["plan.json"], Evidence: files["run.json"], Review: review}, nil
+}
+
+func boundedBundleDirectory(data []byte) bool {
+	if len(data) < 22 {
+		return false
+	}
+	footer := data[len(data)-22:]
+	if binary.LittleEndian.Uint32(footer) != 0x06054b50 || binary.LittleEndian.Uint16(footer[4:]) != 0 || binary.LittleEndian.Uint16(footer[6:]) != 0 || binary.LittleEndian.Uint16(footer[8:]) != 4 || binary.LittleEndian.Uint16(footer[10:]) != 4 || binary.LittleEndian.Uint16(footer[20:]) != 0 {
+		return false
+	}
+	start := uint64(binary.LittleEndian.Uint32(footer[16:]))
+	size := uint64(binary.LittleEndian.Uint32(footer[12:]))
+	if size > 4096 || start+size != uint64(len(data)-22) {
+		return false
+	}
+	directory := data[start : start+size]
+	for range 4 {
+		if len(directory) < 46 || binary.LittleEndian.Uint32(directory) != 0x02014b50 {
+			return false
+		}
+		recordSize := 46 + int(binary.LittleEndian.Uint16(directory[28:])) + int(binary.LittleEndian.Uint16(directory[30:])) + int(binary.LittleEndian.Uint16(directory[32:]))
+		if recordSize > len(directory) {
+			return false
+		}
+		directory = directory[recordSize:]
+	}
+	return len(directory) == 0
 }

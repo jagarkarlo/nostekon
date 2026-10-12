@@ -3,6 +3,7 @@ package backupreview
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"os"
@@ -170,4 +171,32 @@ func TestBundleAdmission(t *testing.T) {
 func fmtBytes(size int) string {
 	data, _ := json.Marshal(size)
 	return `"bytes": ` + string(data)
+}
+
+func TestBundleRejectsUnboundedDirectoryAndTrailingBytes(t *testing.T) {
+	plan, evidence := validFixture(t, false)
+	archive, err := Bundle(plan, evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"count", "directory-size", "multi-disk", "trailing"} {
+		t.Run(name, func(t *testing.T) {
+			data := bytes.Clone(archive)
+			footer := data[len(data)-22:]
+			switch name {
+			case "count":
+				binary.LittleEndian.PutUint16(footer[8:], 65535)
+				binary.LittleEndian.PutUint16(footer[10:], 65535)
+			case "directory-size":
+				binary.LittleEndian.PutUint32(footer[12:], 4097)
+			case "multi-disk":
+				binary.LittleEndian.PutUint16(footer[4:], 1)
+			case "trailing":
+				data = append(data, []byte("unaccounted")...)
+			}
+			if _, err := ReadBundle(data); err == nil {
+				t.Fatal("unsafe ZIP directory admitted")
+			}
+		})
+	}
 }
