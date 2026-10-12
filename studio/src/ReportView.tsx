@@ -40,7 +40,7 @@ function download(name: string, text: string, type: string) {
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
-export function ReportView({ onReachability, selection }: { onReachability: (online: boolean) => void; selection?: { source: string; sampleId: string; attestation?: string } }) {
+export function ReportView({ onReachability, selection }: { onReachability: (online: boolean) => void; selection?: { source: string; sampleId: string; attestation?: string; backupPlan?: string } }) {
   const [source, setSource] = useState("");
   const [sampleId, setSampleId] = useState("");
   const [sourceError, setSourceError] = useState("");
@@ -54,6 +54,8 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const generation = useRef(0);
+  const saveRevision = useRef(0);
+  const [backupPlan, setBackupPlan] = useState({ text: "", name: "" });
   const editorRef = useRef<CodeEditorHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attestation, setAttestation] = useState("");
@@ -67,6 +69,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
 
   const build = useCallback(
     async (text: string, current = ++generation.current, serverAttestation = "", showReport = true) => {
+      saveRevision.current++;
       setIsBuilding(true);
       setRequestError("");
       setSaved(false);
@@ -112,6 +115,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
         setImportedKey(undefined);
         setAttestation("");
         setAttestationName("");
+        setBackupPlan({ text: "", name: "" });
         await build(text, current);
       } catch (error) { if (current === generation.current) setSourceError(String(error)); }
     },
@@ -120,6 +124,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
 
   useEffect(() => {
     if (selection) {
+      setBackupPlan({ text: selection.backupPlan ?? "", name: selection.backupPlan ? "Saved original restore plan" : "" });
       setAttestation(selection.attestation ?? "");
       setAttestationName(selection.attestation ? "Saved original attestation" : "");
       setSource(selection.source);
@@ -158,7 +163,8 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
   async function save() {
     if (!report || stale) return;
     setSaving(true);
-    try { await saveRun(builtFrom, report, sampleId, attestation); setSaved(true); setSourceError(""); }
+    const current = saveRevision.current;
+    try { await saveRun(builtFrom, report, sampleId, attestation, backupPlan.text); if (current === saveRevision.current) { setSaved(true); setSourceError(""); } }
     catch (error) { setSourceError(error instanceof Error ? error.message : "Browser storage is unavailable."); }
     finally { setSaving(false); }
   }
@@ -169,6 +175,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
     setImportingArchive(true); setIsBuilding(false);
     setSource(""); setReport(null); setBuiltFrom(""); setSampleId("");
     setAttestation(""); setAttestationName(""); setImportedKey(undefined);
+    setBackupPlan({ text: "", name: "" }); saveRevision.current++;
     setArchiveResult(""); setSourceError(""); setRequestError(""); setProblems([]); setSaved(false);
     try {
       if (file.size > MAX_SIGNED_ARCHIVE_BYTES) throw new Error("Signed archive exceeds the 17 MiB limit.");
@@ -279,6 +286,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
               }
               setSourceError("");
               setAttestation(text);
+              saveRevision.current++;
               setSaved(false);
               setAttestationName(file.name);
             }).catch(() => setSourceError("Could not read the attestation sidecar."));
@@ -308,7 +316,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
           <button type="button" role="tab" aria-selected={tab === "plan"} onClick={() => setTab("plan")}>Plan review</button>
           <div className="report-actions">
             {stale && <span className="stale-inline">Evidence edited</span>}
-            <button className="tool" type="button" disabled={!report || stale || isBuilding || importingArchive || saving || saved} onClick={() => void save()} title="Save original evidence, attached attestation and report in this browser"><Save size={15} /> {saved ? "Saved" : saving ? "Saving..." : "Save run"}</button>
+            <button className="tool" type="button" disabled={!report || stale || isBuilding || importingArchive || saving || saved} onClick={() => void save()} title="Save original evidence, attached plan and attestation in this browser"><Save size={15} /> {saved ? "Saved" : saving ? "Saving..." : "Save run"}</button>
             <button className="icon-button" type="button" disabled={!source} aria-label="Download original evidence" title="Download original DrillRun evidence" onClick={() => download("nostekon.run.json", source, "application/json")}><Download size={15} /></button>
             <button className="primary" type="button" disabled={isBuilding || !inspection.ok || source.length === 0} onClick={() => void build(source)}>
               {isBuilding ? <LoaderCircle className="spin" size={15} /> : <Play size={14} fill="currentColor" />}
@@ -328,7 +336,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
         {sourceError && <div className="banner bad" role="alert"><XCircle size={15} /> {sourceError}</div>}
 
         <div hidden={tab !== "plan"}>
-          <BackupWorkbench evidence={source} onImport={text => {
+          <BackupWorkbench evidence={source} plan={backupPlan} onPlanChange={plan => { saveRevision.current++; setBackupPlan(plan); setSaved(false); }} onImport={text => {
             setSource(text); setSampleId(""); setSourceError(""); setAttestation(""); setAttestationName(""); setArchiveResult(""); setImportedKey(undefined);
             void build(text, undefined, "", false);
           }} />

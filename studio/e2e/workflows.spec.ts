@@ -24,6 +24,74 @@ function evidenceArchive(files: Awaited<ReturnType<typeof suiteBundle>>) {
 }
 
 for (const width of [390, 1440]) {
+  test(`saved backup plans survive reload and original-only history backup at ${width}px`, async ({ page }) => {
+    const [plan, evidence] = await Promise.all([
+      readFile(new URL("./postgresql-semantic-rehearsal.plan.json", import.meta.url)),
+      readFile(new URL("./postgresql-semantic-rehearsal.run.json", import.meta.url)),
+    ]);
+    const name = JSON.parse(evidence.toString()).metadata.name;
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(process.env.NOSTEKON_APP_URL ? "/#/report" : "/demo/#/report");
+    await page.getByTestId("evidence-input").setInputFiles({ name: "original.run.json", mimeType: "application/json", buffer: evidence });
+    await page.getByRole("tab", { name: "Plan review", exact: true }).click();
+    await page.getByTestId("backup-plan-input").setInputFiles({ name: "original.plan.json", mimeType: "application/json", buffer: plan });
+    const gate = page.getByRole("status", { name: "Backup plan gate" });
+    await expect(gate).toContainText("Failed");
+    await page.getByRole("button", { name: "Save run", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Runs", exact: true }).click();
+    await page.reload();
+    await expect(page.getByText("Restore plan attached", { exact: true })).toBeVisible();
+    const planDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: `Download restore plan for ${name}`, exact: true }).click();
+    expect(await readFile((await (await planDownload).path())!)).toEqual(plan);
+    const backupDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Back up saved runs", exact: true }).click();
+    const backupBytes = await readFile((await (await backupDownload).path())!);
+    const backup = JSON.parse(backupBytes.toString());
+    expect(backup.apiVersion).toBe("nostekon/run-backup/v2alpha1");
+    expect(backup.runs[0].backupPlan).toBe(plan.toString());
+    expect(backup.runs[0].backupPlanSha256).toBe(createHash("sha256").update(plan).digest("hex"));
+    expect(backup.runs[0]).not.toHaveProperty("backupReview");
+    await page.getByRole("button", { name, exact: true }).click();
+    await page.getByRole("tab", { name: "Plan review", exact: true }).click();
+    await expect(gate).toContainText("Failed");
+    await expect(gate).toContainText("Complete");
+    await expect(gate).toContainText("Matches");
+    await expect(gate).toContainText("Unauthenticated provenance");
+    await page.getByRole("link", { name: "Runs", exact: true }).click();
+    await page.getByRole("button", { name: `Delete ${name}`, exact: true }).click();
+    await page.getByRole("button", { name: "Delete run", exact: true }).click();
+    await expect(page.getByText("No saved runs yet", { exact: true })).toBeVisible();
+    await page.getByTestId("run-backup-input").setInputFiles({ name: "history.backup.json", mimeType: "application/json", buffer: backupBytes });
+    await page.getByRole("button", { name: "Confirm restore", exact: true }).click();
+    await expect(page.getByRole("status", { name: "Run backup restore result" })).toContainText("1 run restored");
+    await page.getByRole("button", { name, exact: true }).click();
+    await page.getByRole("tab", { name: "Plan review", exact: true }).click();
+    await expect(gate).toContainText("Failed");
+    await page.evaluate(() => {
+      const original = crypto.subtle.digest.bind(crypto.subtle);
+      crypto.subtle.digest = (algorithm, data) => new Promise<void>(resolve => {
+        (window as Window & { releaseRunSave?: () => void }).releaseRunSave = () => {
+          crypto.subtle.digest = original;
+          resolve();
+        };
+      }).then(() => original(algorithm, data));
+    });
+    await page.getByRole("button", { name: "Save run", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Saving...", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Remove restore plan", exact: true }).click();
+    await page.evaluate(() => (window as Window & { releaseRunSave?: () => void }).releaseRunSave!());
+    await expect(page.getByRole("button", { name: "Save run", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Saved", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Save run", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Runs", exact: true }).click();
+    await page.reload();
+    await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+    await expect(page.getByText("Restore plan attached", { exact: true })).toHaveCount(0);
+  });
+
   test(`independent backup plan gate and portable originals round-trip at ${width}px`, async ({ page }, testInfo) => {
     const planPath = new URL("./postgresql-semantic-rehearsal.plan.json", import.meta.url);
     const runPath = new URL("./postgresql-semantic-rehearsal.run.json", import.meta.url);

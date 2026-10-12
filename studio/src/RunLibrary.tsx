@@ -9,7 +9,7 @@ import { request } from "./api";
 import { createRunBackup, MAX_RUN_BACKUP_BYTES, readRunBackup } from "./runBackup";
 import type { OriginalRun } from "./runBackup";
 
-export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: string, attestation?: string) => void }) {
+export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: string, attestation?: string, backupPlan?: string) => void }) {
   const [runs, setRuns] = useState<SavedRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -65,7 +65,7 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
     setBackupBusy(true); setError(""); setBackupResult("");
     try {
       const signal = AbortSignal.timeout(60000);
-      const evaluated: { source: string; attestation?: string; report: Report }[] = [];
+      const evaluated: (OriginalRun & { report: Report })[] = [];
       for (const original of pendingRestore) {
         const response = await request("/api/v1/runs/report", original.source, signal);
         if (!response.ok) throw new Error(`Backup evidence evaluation failed (HTTP ${response.status}); no runs were restored.`);
@@ -140,13 +140,13 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
         <thead><tr><th aria-label="Comparison selection" /><th>Run</th><th>Evidence</th><th>Verdict</th><th>Depth</th><th>Recovery time</th><th>Data loss</th><th aria-label="Actions" /></tr></thead>
         <tbody>{matching.map((run) => <tr key={run.id}>
           <td><input type="checkbox" aria-label={`Compare ${run.report.name}`} checked={selected.includes(run.id)} disabled={selected.length === 2 && !selected.includes(run.id)} onChange={(event) => { setCompare(false); setSelected(event.target.checked ? [...selected, run.id] : selected.filter((id) => id !== run.id)); }} /></td>
-          <td><button type="button" className="run-name" onClick={() => onOpen(run.source, run.sampleId, run.attestation)}>{run.report.name}</button><small>{run.report.scenario ?? "Unspecified scenario"}</small></td>
-          <td data-label="Evidence"><span className="evidence-kind">{evidenceLabel(run.sampleId)}</span>{run.attestation && <small className="attachment-label"><Paperclip size={13} aria-hidden="true" /> Attestation attached</small>}</td>
+          <td><button type="button" className="run-name" onClick={() => onOpen(run.source, run.sampleId, run.attestation, run.backupPlan)}>{run.report.name}</button><small>{run.report.scenario ?? "Unspecified scenario"}</small></td>
+          <td data-label="Evidence"><span className="evidence-kind">{evidenceLabel(run.sampleId)}</span>{run.attestation && <small className="attachment-label"><Paperclip size={13} aria-hidden="true" /> Attestation attached</small>}{run.backupPlan && <small className="attachment-label"><FileJson size={13} aria-hidden="true" /> Restore plan attached</small>}</td>
           <td data-label="Verdict"><span className={`verdict-tag ${run.report.verdict}`}>{run.report.verdict}</span></td>
           <td data-label="Depth" className="mono">{run.report.deepestPassed ?? "None"}</td>
           <td data-label="Recovery time" className="mono">{formatDuration(run.report.rto?.seconds)}</td>
           <td data-label="Data loss" className="mono">{formatDuration(run.report.rpo?.seconds)}</td>
-          <td><button type="button" className="icon-button" title={`Download evidence for ${run.report.name}`} aria-label={`Download evidence for ${run.report.name}`} onClick={() => downloadOriginal("nostekon.run.json", run.source)}><Download size={15} /></button>{run.attestation && <button type="button" className="icon-button" title={`Download attestation for ${run.report.name}`} aria-label={`Download attestation for ${run.report.name}`} onClick={() => downloadOriginal("nostekon.run.attestation.json", run.attestation!)}><Paperclip size={15} /></button>}<button type="button" className="icon-button" title={`Delete ${run.report.name}`} aria-label={`Delete ${run.report.name}`} onClick={() => setPendingDelete(run)}><Trash2 size={15} /></button></td>
+          <td><button type="button" className="icon-button" title={`Download evidence for ${run.report.name}`} aria-label={`Download evidence for ${run.report.name}`} onClick={() => downloadOriginal("nostekon.run.json", run.source)}><Download size={15} /></button>{run.attestation && <button type="button" className="icon-button" title={`Download attestation for ${run.report.name}`} aria-label={`Download attestation for ${run.report.name}`} onClick={() => downloadOriginal("nostekon.run.attestation.json", run.attestation!)}><Paperclip size={15} /></button>}{run.backupPlan && <button type="button" className="icon-button" title={`Download restore plan for ${run.report.name}`} aria-label={`Download restore plan for ${run.report.name}`} onClick={() => downloadOriginal("nostekon.restore-plan.json", run.backupPlan!)}><FileJson size={15} /></button>}<button type="button" className="icon-button" title={`Delete ${run.report.name}`} aria-label={`Delete ${run.report.name}`} onClick={() => setPendingDelete(run)}><Trash2 size={15} /></button></td>
         </tr>)}</tbody>
       </table></div>}
     </section>

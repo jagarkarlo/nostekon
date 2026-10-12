@@ -21,7 +21,7 @@ const browserDemo = window.location.pathname.startsWith("/demo/");
 export function App() {
   const [view, setView] = useState<View>(viewFromHash);
   const [apiState, setAPIState] = useState<APIState>("checking");
-  const [selection, setSelection] = useState<{ source: string; sampleId: string; attestation?: string }>();
+  const [selection, setSelection] = useState<{ source: string; sampleId: string; attestation?: string; backupPlan?: string }>();
   const [suiteSelection, setSuiteSelection] = useState<Map<string, string>>();
   const [aboutOpen, setAboutOpen] = useState(false);
   const [theme, setTheme] = useState(() => {
@@ -93,8 +93,8 @@ export function App() {
         </button>
       </header>
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
-      {view === "runs" && <RunLibrary onOpen={(source, sampleId, attestation) => {
-        setSelection({ source, sampleId, attestation });
+      {view === "runs" && <RunLibrary onOpen={(source, sampleId, attestation, backupPlan) => {
+        setSelection({ source, sampleId, attestation, backupPlan });
         window.location.hash = "/report";
         setView("report");
       }} />}
