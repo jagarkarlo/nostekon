@@ -134,6 +134,31 @@ def _cmd_backup_restore(args: argparse.Namespace) -> int:
         signal.signal(signal.SIGTERM, previous)
 
 
+def _cmd_backup_preflight(args: argparse.Namespace) -> int:
+    from nostekon.backup_restore import preflight_backup
+
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt("backup preflight interrupted")
+
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        result = preflight_backup(Path(args.file), plan=Path(args.plan))
+        print(json.dumps(result, indent=2))
+        print(
+            "Technical preflight only; not approval or restore evidence. No target created.",
+            file=sys.stderr,
+        )
+        return 0 if result["passed"] else 1
+    except KeyboardInterrupt:
+        print("error: preflight interrupted; no restore was started", file=sys.stderr)
+        return 130
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _cmd_backup_recover(args: argparse.Namespace) -> int:
     def interrupt(signum, frame):
         raise KeyboardInterrupt("backup recovery interrupted")
@@ -439,6 +464,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--plan", help="strict restore plan; no expectation or timeout overrides"
     )
     backup_restore.set_defaults(handler=_cmd_backup_restore)
+    backup_preflight = backup_commands.add_parser(
+        "preflight",
+        help="check reviewed backup binding and local metadata without creating a target",
+    )
+    backup_preflight.add_argument("--file", required=True, help="approved custom archive, <=64 MiB")
+    backup_preflight.add_argument("--plan", required=True, help="reviewed strict restore plan")
+    backup_preflight.set_defaults(handler=_cmd_backup_preflight)
     backup_recover = backup_commands.add_parser(
         "recover", help="inspect a private recovery checkpoint; cleanup requires confirmation"
     )

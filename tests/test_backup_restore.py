@@ -30,6 +30,258 @@ def test_snapshot_preserves_exact_bytes_without_mutating_original(tmp_path):
     assert hashlib.sha256(snapshot.read_bytes()).hexdigest() == hashlib.sha256(original).hexdigest()
 
 
+def test_backup_preflight_checks_bound_bytes_and_queries_only_local_metadata(tmp_path, monkeypatch):
+    source = tmp_path / "approved.dump"
+    original = b"PGDMPsynthetic admission fixture, not a real archive"
+    source.write_bytes(original)
+    plan = tmp_path / "reviewed-plan.json"
+    commands = []
+
+    def metadata(arguments, *, timeout):
+        commands.append(arguments)
+        assert 0 < timeout <= 30
+        if arguments[0] == "info":
+            return json.dumps(
+                {"os": "linux", "architecture": "x86_64", "memoryBytes": 2**30, "cpus": 2}
+            ).encode()
+        if arguments[:2] == ["image", "inspect"] and "--format={{.Id}}" in arguments:
+            return b"sha256:" + b"a" * 64
+        assert arguments[:2] == ["image", "inspect"]
+        assert arguments[-1] == "sha256:" + "a" * 64
+        return json.dumps(
+            {"id": "sha256:" + "a" * 64, "os": "linux", "architecture": "amd64"}
+        ).encode()
+
+    monkeypatch.setattr(restore, "docker_command", metadata)
+    restore.create_restore_plan(source, plan, tables={"public.orders": 3}, timeout=30)
+    original_plan = plan.read_bytes()
+    commands.clear()
+    result = restore.preflight_backup(source, plan=plan)
+    assert result["apiVersion"] == "nostekon/backup-preflight/v1alpha1"
+    assert result["kind"] == "PostgreSQLBackupPreflight"
+    assert result["passed"] is True
+    assert result["backupMatches"] is True
+    assert all(check["passed"] for check in result["checks"])
+    assert len(commands) == 2
+    assert commands[0][0] == "info"
+    assert commands[1][:2] == ["image", "inspect"]
+    assert len(result["limitations"]) >= 3
+    assert source.read_bytes() == original
+    assert plan.read_bytes() == original_plan
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "approved.dump",
+        "reviewed-plan.json",
+    ]
+
+
+@pytest.fixture
+def preflight_inputs(tmp_path):
+    source = tmp_path / "approved.dump"
+    source.write_bytes(b"PGDMPsynthetic preflight input, not a valid restore archive")
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "apiVersion": "nostekon/restore-plan/v1alpha1",
+                "kind": "PostgreSQLRestorePlan",
+                "backup": {
+                    "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                    "bytes": source.stat().st_size,
+                },
+                "imageId": "sha256:" + "a" * 64,
+                "tables": {"public.orders": 3},
+                "timeoutSeconds": 300,
+            }
+        )
+    )
+    return source, plan
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "daemon-error",
+        "daemon-json",
+        "daemon-shape",
+        "daemon-extra",
+        "daemon-os",
+        "daemon-arch",
+        "memory-bool",
+        "memory-float",
+        "memory-low",
+        "cpu-bool",
+        "cpu-float",
+        "cpu-zero",
+        "image-error",
+        "image-id",
+        "image-os",
+        "image-arch",
+        "image-extra",
+        "image-json",
+        "image-shape",
+        "no-counts",
+    ],
+)
+def test_backup_preflight_rejects_host_or_image_blockers(preflight_inputs, monkeypatch, scenario):
+    source, plan = preflight_inputs
+    commands = []
+    if scenario == "no-counts":
+        reviewed = json.loads(plan.read_text())
+        reviewed["tables"] = {}
+        plan.write_text(json.dumps(reviewed))
+
+    def metadata(arguments, *, timeout):
+        commands.append(arguments)
+        assert arguments[0] == "info" or arguments[:2] == ["image", "inspect"]
+        if arguments[0] == "info":
+            if scenario == "daemon-error":
+                raise RuntimeError("private-sentinel-daemon-output")
+            if scenario == "daemon-json":
+                return b"private-sentinel-invalid-json"
+            if scenario == "daemon-shape":
+                return b"[]"
+            payload = {"os": "linux", "architecture": "x86_64", "memoryBytes": 2**30, "cpus": 2}
+            changes = {
+                "daemon-extra": {"extra": "private-sentinel"},
+                "daemon-os": {"os": "windows"},
+                "daemon-arch": {"architecture": "unsupported"},
+                "memory-bool": {"memoryBytes": True},
+                "memory-float": {"memoryBytes": float(2**30)},
+                "memory-low": {"memoryBytes": 1},
+                "cpu-bool": {"cpus": True},
+                "cpu-float": {"cpus": 2.0},
+                "cpu-zero": {"cpus": 0},
+            }
+        else:
+            if scenario == "image-error":
+                raise subprocess.TimeoutExpired("private-sentinel", timeout)
+            if scenario == "image-json":
+                return b"private-sentinel-invalid-json"
+            if scenario == "image-shape":
+                return b"[]"
+            payload = {"id": "sha256:" + "a" * 64, "os": "linux", "architecture": "amd64"}
+            changes = {
+                "image-id": {"id": "sha256:" + "b" * 64},
+                "image-os": {"os": "windows"},
+                "image-arch": {"architecture": "arm64"},
+                "image-extra": {"extra": "private-sentinel"},
+            }
+        payload.update(changes.get(scenario, {}))
+        return json.dumps(payload).encode()
+
+    monkeypatch.setattr(restore, "docker_command", metadata)
+    result = restore.preflight_backup(source, plan=plan)
+    assert result["passed"] is False
+    assert result["backupMatches"] is True
+    assert any(not check["passed"] for check in result["checks"])
+    assert "private-sentinel" not in json.dumps(result)
+    assert len(commands) <= 2
+
+
+@pytest.mark.parametrize("scenario", ["non-linux", "invalid-plan", "invalid-header"])
+def test_backup_preflight_admission_never_queries_docker(preflight_inputs, monkeypatch, scenario):
+    source, plan = preflight_inputs
+    monkeypatch.setattr(
+        restore, "docker_command", lambda *args, **kwargs: pytest.fail("Docker queried")
+    )
+    if scenario == "non-linux":
+        monkeypatch.setattr(restore.sys, "platform", "darwin")
+    elif scenario == "invalid-plan":
+        plan.write_text("{}")
+    else:
+        source.write_bytes(b"not a PostgreSQL custom archive")
+    with pytest.raises((ValueError, RuntimeError)):
+        restore.preflight_backup(source, plan=plan)
+
+
+def test_backup_preflight_changed_bytes_never_query_docker(preflight_inputs, monkeypatch):
+    source, plan = preflight_inputs
+    source.write_bytes(source.read_bytes() + b"changed")
+    monkeypatch.setattr(
+        restore, "docker_command", lambda *args, **kwargs: pytest.fail("Docker queried")
+    )
+    result = restore.preflight_backup(source, plan=plan)
+    assert result["passed"] is False
+    assert result["backupMatches"] is False
+    assert {check["name"] for check in result["checks"]} == {
+        "backup-plan-binding",
+        "snapshot-count-coverage",
+    }
+
+
+def test_backup_preflight_metadata_deadline_and_missing_counts(preflight_inputs, monkeypatch):
+    source, plan = preflight_inputs
+    reviewed = json.loads(plan.read_text())
+    reviewed["tables"] = {}
+    plan.write_text(json.dumps(reviewed))
+    clock = iter([100, 100, 131])
+    monkeypatch.setattr(restore.time, "monotonic", lambda: next(clock))
+    commands = []
+
+    def metadata(arguments, *, timeout):
+        commands.append(arguments)
+        assert arguments[0] == "info"
+        return b'{"os":"linux","architecture":"x86_64","memoryBytes":1073741824,"cpus":2}'
+
+    monkeypatch.setattr(restore, "docker_command", metadata)
+    result = restore.preflight_backup(source, plan=plan)
+    assert result["passed"] is False
+    assert result["requestedLevel"] == "V2"
+    assert len(commands) == 1
+    assert not next(
+        check["passed"] for check in result["checks"] if check["name"] == "native-pinned-image"
+    )
+    assert not next(
+        check["passed"] for check in result["checks"] if check["name"] == "snapshot-count-coverage"
+    )
+
+
+def test_backup_preflight_cli_routes_json_and_distinct_exits(preflight_inputs, monkeypatch, capsys):
+    from nostekon.cli import main
+
+    source, plan = preflight_inputs
+    result = {
+        "apiVersion": "nostekon/backup-preflight/v1alpha1",
+        "kind": "PostgreSQLBackupPreflight",
+        "passed": True,
+    }
+    monkeypatch.setattr(restore, "preflight_backup", lambda backup, *, plan: result)
+    arguments = ["backup", "preflight", "--file", str(source), "--plan", str(plan)]
+    assert main(arguments) == 0
+    assert json.loads(capsys.readouterr().out) == result
+    result["passed"] = False
+    assert main(arguments) == 1
+    assert json.loads(capsys.readouterr().out) == result
+
+    def invalid(*args, **kwargs):
+        raise ValueError("strict admission rejected")
+
+    monkeypatch.setattr(restore, "preflight_backup", invalid)
+    assert main(arguments) == 2
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "strict admission rejected" in captured.err
+
+    import signal
+
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(restore, "preflight_backup", interrupted)
+    assert main(arguments) == 130
+    assert signal.getsignal(signal.SIGTERM) == previous
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "no restore was started" in captured.err
+    for forbidden in ["--output", "--expect-table", "--timeout", "--confirm-cleanup"]:
+        with pytest.raises(SystemExit) as error:
+            main([*arguments, forbidden, "unsupported"])
+        assert error.value.code == 2
+        capsys.readouterr()
+
+
 @pytest.mark.parametrize("payload", [b"", b"SELECT 1;", b"PGDM", b"PGDMP" + b"x" * 64])
 def test_bad_or_oversized_backup_leaves_no_snapshot(tmp_path, monkeypatch, payload):
     source = tmp_path / "input.dump"
@@ -1345,6 +1597,11 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
                 == exit_code
             )
             recorded = json.loads(planned_output.read_text())
+            preflight = restore.preflight_backup(backup, plan=plan_path)
+            assert preflight["passed"] is True
+            assert preflight["backupMatches"] is True
+            assert preflight["requestedLevel"] == "V3"
+            assert all(check["passed"] for check in preflight["checks"])
             assert any(
                 check["name"] == "Restore plan binding" and check["passed"]
                 for check in recorded["status"]["checks"]

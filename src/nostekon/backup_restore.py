@@ -220,6 +220,165 @@ def load_validation_profile(path: Path) -> list:
     return _validate_invariants(profile["invariants"])
 
 
+def preflight_backup(backup: Path, *, plan: Path) -> dict:
+    if sys.platform != "linux":
+        raise ValueError("backup preflight requires Linux and a local Docker daemon")
+    reviewed = load_restore_plan(plan)
+    with tempfile.TemporaryDirectory(prefix="nostekon-preflight-") as directory:
+        snapshot = snapshot_backup(backup, Path(directory))
+        with snapshot.open("rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        observed = {"sha256": digest, "bytes": snapshot.stat().st_size}
+    matches = observed == reviewed["backup"]
+    checks = [
+        {
+            "name": "backup-plan-binding",
+            "passed": matches,
+            "detail": "Frozen archive checksum and size match the plan"
+            if matches
+            else "Backup differs from the reviewed plan; no Docker queries were made",
+        },
+        {
+            "name": "snapshot-count-coverage",
+            "passed": bool(reviewed["tables"]),
+            "detail": "At least one table count is declared"
+            if reviewed["tables"]
+            else "Pilot preflight requires snapshot-specific table-count expectations",
+        },
+    ]
+    limitations = [
+        "Technical prerequisites only; not approval, sanitization or dedicated-host confirmation",
+        "Header/byte binding only; full archive validity and restore success untested",
+        "Server/extensions, expanded size, free capacity and business coverage need owner review",
+        "No restore ran; capture authenticity, incident RTO and acknowledged-write RPO unmeasured",
+    ]
+    if not reviewed.get("invariants"):
+        limitations.append(
+            "No semantic rules declared; table counts alone do not prove application correctness"
+        )
+    result = {
+        "apiVersion": "nostekon/backup-preflight/v1alpha1",
+        "kind": "PostgreSQLBackupPreflight",
+        "passed": False,
+        "backupMatches": matches,
+        "backup": observed,
+        "planSHA256": hashlib.sha256(
+            json.dumps(reviewed, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        "imageId": reviewed["imageId"],
+        "requestedLevel": "V4"
+        if reviewed.get("invariants")
+        else "V3"
+        if reviewed["tables"]
+        else "V2",
+        "checks": checks,
+        "limitations": limitations,
+    }
+    if not matches:
+        return result
+    deadline = time.monotonic() + 30
+
+    def metadata(arguments):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("backup preflight metadata deadline exceeded")
+        return json.loads(docker_command(arguments, timeout=remaining))
+
+    aliases = {"x86_64": "amd64", "aarch64": "arm64"}
+    architecture = None
+    try:
+        daemon = metadata(
+            [
+                "info",
+                '--format={"os":{{json .OSType}},"architecture":{{json .Architecture}},'
+                '"memoryBytes":{{json .MemTotal}},"cpus":{{json .NCPU}}}',
+            ]
+        )
+        if type(daemon) is not dict or set(daemon) != {"os", "architecture", "memoryBytes", "cpus"}:
+            raise ValueError("unexpected daemon metadata")
+        if type(daemon["architecture"]) is not str:
+            raise ValueError("invalid daemon architecture")
+        architecture = aliases.get(daemon["architecture"], daemon["architecture"])
+        native = daemon["os"] == "linux" and architecture in ("amd64", "arm64")
+        resources = (
+            type(daemon["memoryBytes"]) is int
+            and daemon["memoryBytes"] >= 512 * 1024 * 1024
+            and type(daemon["cpus"]) is int
+            and daemon["cpus"] >= 1
+        )
+        checks.extend(
+            [
+                {
+                    "name": "local-linux-daemon",
+                    "passed": native,
+                    "detail": "Local Linux Docker daemon on a supported native architecture"
+                    if native
+                    else "Daemon OS or architecture is unsupported",
+                },
+                {
+                    "name": "daemon-resource-floor",
+                    "passed": resources,
+                    "detail": "At least 512 MiB and one CPU advertised; free capacity untested"
+                    if resources
+                    else "Daemon does not advertise the configured rehearsal resource floor",
+                },
+            ]
+        )
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        checks.append(
+            {
+                "name": "local-linux-daemon",
+                "passed": False,
+                "detail": "Docker metadata failed admission/query/deadline; raw output omitted",
+            }
+        )
+    if architecture is not None:
+        try:
+            image = metadata(
+                [
+                    "image",
+                    "inspect",
+                    '--format={"id":{{json .Id}},"os":{{json .Os}},'
+                    '"architecture":{{json .Architecture}}}',
+                    reviewed["imageId"],
+                ]
+            )
+            valid = (
+                type(image) is dict
+                and set(image) == {"id", "os", "architecture"}
+                and image["id"] == reviewed["imageId"]
+                and image["os"] == "linux"
+                and image["architecture"] == architecture
+            )
+            checks.append(
+                {
+                    "name": "native-pinned-image",
+                    "passed": valid,
+                    "detail": "Exact cached Linux image matches native daemon architecture"
+                    if valid
+                    else "Cached image identity, OS or native architecture does not match",
+                }
+            )
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            checks.append(
+                {
+                    "name": "native-pinned-image",
+                    "passed": False,
+                    "detail": "Pinned image unavailable or metadata query failed; no image pulled",
+                }
+            )
+    else:
+        checks.append(
+            {
+                "name": "native-pinned-image",
+                "passed": False,
+                "detail": "Image metadata was not queried because daemon prerequisites failed",
+            }
+        )
+    result["passed"] = all(check["passed"] for check in checks)
+    return result
+
+
 def create_restore_plan(
     backup: Path, output: Path, *, tables=None, timeout=300, validation_profile: Path | None = None
 ) -> dict:
