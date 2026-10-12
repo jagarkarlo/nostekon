@@ -88,18 +88,63 @@ def _restore_settings(tables, timeout) -> dict:
     return tables
 
 
+def _validate_invariants(invariants) -> list:
+    if type(invariants) is not list or not 1 <= len(invariants) <= 20:
+        raise ValueError("validation profile requires 1..20 invariants")
+    names = set()
+    for invariant in invariants:
+        if type(invariant) is not dict or invariant.get("type") not in (
+            "not_null",
+            "unique",
+            "foreign_key",
+        ):
+            raise ValueError("unsupported invariant type")
+        fields = {"name", "type", "table", "column"}
+        if invariant["type"] == "foreign_key":
+            fields.add("reference")
+        if set(invariant) != fields:
+            raise ValueError("invariant contains missing or unknown fields")
+        name = invariant["name"]
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", name):
+            raise ValueError("invariant name must be a lowercase slug of at most 63 characters")
+        if name in names:
+            raise ValueError("duplicate invariant names are not allowed")
+        names.add(name)
+        relations = [(invariant["table"], invariant["column"])]
+        if invariant["type"] == "foreign_key":
+            reference = invariant["reference"]
+            if type(reference) is not dict or set(reference) != {"table", "column"}:
+                raise ValueError("foreign-key reference requires exactly table and column")
+            relations.append((reference["table"], reference["column"]))
+        for table, column in relations:
+            if (
+                not isinstance(table, str)
+                or not isinstance(column, str)
+                or not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", column)
+            ):
+                raise ValueError("invariant table and column must be validated SQL identifiers")
+            _restore_settings({table: 0}, 300)
+    return invariants
+
+
 def _validate_plan(plan) -> dict:
-    if type(plan) is not dict or set(plan) != {
+    if type(plan) is not dict:
+        raise ValueError("restore plan must be an object")
+    fields = {
         "apiVersion",
         "kind",
         "backup",
         "imageId",
         "tables",
         "timeoutSeconds",
-    }:
+    }
+    if plan.get("apiVersion") == "nostekon/restore-plan/v2alpha1":
+        fields.add("invariants")
+    if set(plan) != fields:
         raise ValueError("restore plan must contain exactly the versioned plan fields")
     if (
-        plan["apiVersion"] != "nostekon/restore-plan/v1alpha1"
+        plan["apiVersion"]
+        not in ("nostekon/restore-plan/v1alpha1", "nostekon/restore-plan/v2alpha1")
         or plan["kind"] != "PostgreSQLRestorePlan"
     ):
         raise ValueError("unsupported restore plan version or kind")
@@ -120,29 +165,31 @@ def _validate_plan(plan) -> dict:
     if type(plan["tables"]) is not dict:
         raise ValueError("restore plan tables must be an object")
     _restore_settings(plan["tables"], plan["timeoutSeconds"])
+    if "invariants" in plan:
+        _validate_invariants(plan["invariants"])
     return plan
 
 
-def load_restore_plan(path: Path) -> dict:
+def _load_bounded_json(path: Path, label: str):
     def unique_fields(pairs):
         result = {}
         for key, value in pairs:
             if key in result:
-                raise ValueError("restore plan contains duplicate JSON fields")
+                raise ValueError(f"{label} contains duplicate JSON fields")
             result[key] = value
         return result
 
     def invalid_constant(value):
-        raise ValueError("restore plan cannot contain nonfinite numbers")
+        raise ValueError(f"{label} cannot contain nonfinite numbers")
 
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as handle:
         metadata = os.fstat(handle.fileno())
         if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= MAX_PLAN_BYTES:
-            raise ValueError("restore plan must be a regular file of at most 16 KiB")
+            raise ValueError(f"{label} must be a regular file of at most 16 KiB")
         payload = handle.read(MAX_PLAN_BYTES + 1)
     if len(payload) > MAX_PLAN_BYTES:
-        raise ValueError("restore plan exceeds 16 KiB")
+        raise ValueError(f"{label} exceeds 16 KiB")
     try:
         plan = json.loads(
             payload.decode("utf-8"),
@@ -150,14 +197,35 @@ def load_restore_plan(path: Path) -> dict:
             parse_constant=invalid_constant,
         )
     except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
-        raise ValueError("restore plan must be bounded UTF-8 JSON") from error
-    return _validate_plan(plan)
+        raise ValueError(f"{label} must be bounded UTF-8 JSON") from error
+    return plan
 
 
-def create_restore_plan(backup: Path, output: Path, *, tables=None, timeout=300) -> dict:
+def load_restore_plan(path: Path) -> dict:
+    return _validate_plan(_load_bounded_json(path, "restore plan"))
+
+
+def load_validation_profile(path: Path) -> list:
+    profile = _load_bounded_json(path, "validation profile")
+    if type(profile) is not dict or set(profile) != {"apiVersion", "kind", "invariants"}:
+        raise ValueError("validation profile must contain exactly the versioned profile fields")
+    if (
+        profile["apiVersion"] != "nostekon/validation-profile/v1alpha1"
+        or profile["kind"] != "PostgreSQLValidationProfile"
+    ):
+        raise ValueError("unsupported validation profile version or kind")
+    return _validate_invariants(profile["invariants"])
+
+
+def create_restore_plan(
+    backup: Path, output: Path, *, tables=None, timeout=300, validation_profile: Path | None = None
+) -> dict:
     if sys.platform != "linux":
         raise ValueError("backup rehearsal currently requires Linux and a local Docker daemon")
     tables = _restore_settings(tables, timeout)
+    invariants = (
+        load_validation_profile(validation_profile) if validation_profile is not None else None
+    )
     with tempfile.TemporaryDirectory(prefix="nostekon-plan-") as directory:
         snapshot = snapshot_backup(backup, Path(directory))
         with snapshot.open("rb") as handle:
@@ -169,16 +237,18 @@ def create_restore_plan(backup: Path, output: Path, *, tables=None, timeout=300)
             .decode()
             .strip()
         )
-        plan = _validate_plan(
-            {
-                "apiVersion": "nostekon/restore-plan/v1alpha1",
-                "kind": "PostgreSQLRestorePlan",
-                "backup": {"sha256": digest, "bytes": snapshot.stat().st_size},
-                "imageId": image,
-                "tables": tables,
-                "timeoutSeconds": timeout,
-            }
-        )
+        plan = {
+            "apiVersion": "nostekon/restore-plan/v1alpha1",
+            "kind": "PostgreSQLRestorePlan",
+            "backup": {"sha256": digest, "bytes": snapshot.stat().st_size},
+            "imageId": image,
+            "tables": tables,
+            "timeoutSeconds": timeout,
+        }
+        if invariants is not None:
+            plan["apiVersion"] = "nostekon/restore-plan/v2alpha1"
+            plan["invariants"] = invariants
+        _validate_plan(plan)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=output.parent, prefix=".nostekon-plan-", delete=False

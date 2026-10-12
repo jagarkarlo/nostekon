@@ -121,14 +121,16 @@ def test_plan_loader_rejects_unknown_fields_and_invalid_settings(tmp_path, monke
         b"[" * 1100 + b"]" * 1100,
     ],
 )
-def test_plan_loader_rejects_ambiguous_or_unbounded_json(tmp_path, payload):
+@pytest.mark.parametrize("loader", [restore.load_restore_plan, restore.load_validation_profile])
+def test_plan_loader_rejects_ambiguous_or_unbounded_json(tmp_path, payload, loader):
     path = tmp_path / "plan.json"
     path.write_bytes(payload)
     with pytest.raises(ValueError):
-        restore.load_restore_plan(path)
+        loader(path)
 
 
-def test_plan_loader_rejects_symlink_and_fifo(tmp_path):
+@pytest.mark.parametrize("loader", [restore.load_restore_plan, restore.load_validation_profile])
+def test_plan_loader_rejects_symlink_and_fifo(tmp_path, loader):
     source = tmp_path / "plan.json"
     source.write_text("{}")
     link = tmp_path / "linked.json"
@@ -137,7 +139,7 @@ def test_plan_loader_rejects_symlink_and_fifo(tmp_path):
     os.mkfifo(fifo)
     for path in (link, fifo):
         with pytest.raises((OSError, ValueError)):
-            restore.load_restore_plan(path)
+            loader(path)
 
 
 def test_plan_publication_failure_leaves_no_partial_plan(tmp_path, monkeypatch):
@@ -154,6 +156,122 @@ def test_plan_publication_failure_leaves_no_partial_plan(tmp_path, monkeypatch):
         restore.create_restore_plan(source, output)
     assert not output.exists()
     assert list(tmp_path.glob(".nostekon-plan-*")) == []
+
+
+def validation_profile():
+    return {
+        "apiVersion": "nostekon/validation-profile/v1alpha1",
+        "kind": "PostgreSQLValidationProfile",
+        "invariants": [
+            {
+                "name": "orders-id-required",
+                "type": "not_null",
+                "table": "public.orders",
+                "column": "id",
+            },
+            {
+                "name": "orders-id-unique",
+                "type": "unique",
+                "table": "public.orders",
+                "column": "id",
+            },
+            {
+                "name": "orders-customer-exists",
+                "type": "foreign_key",
+                "table": "public.orders",
+                "column": "customer_id",
+                "reference": {"table": "public.customers", "column": "id"},
+            },
+        ],
+    }
+
+
+def test_validation_profile_is_frozen_inside_v2_plan_without_execution(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    backup = tmp_path / "backup.dump"
+    backup.write_bytes(b"PGDMPfixture")
+    profile_path = tmp_path / "profile.json"
+    profile = validation_profile()
+    profile_path.write_text(json.dumps(profile))
+    output = tmp_path / "plan.json"
+    plan = restore.create_restore_plan(backup, output, validation_profile=profile_path)
+    assert plan["apiVersion"] == "nostekon/restore-plan/v2alpha1"
+    assert plan["invariants"] == profile["invariants"]
+    profile_path.write_text("{}")
+    assert restore.load_restore_plan(output) == plan
+    assert commands == [["image", "inspect", "--format={{.Id}}", "postgres:16.8"]]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"type": "sql", "sql": "DELETE FROM public.orders"},
+        {"name": True},
+        {"name": "x" * 64},
+        {"name": ""},
+        {"table": []},
+        {"table": "pg_catalog.pg_class"},
+        {"table": "pg_temp.orders"},
+        {"table": "public.orders; DROP TABLE orders"},
+        {"column": "id) IS NULL; DELETE FROM orders"},
+        {"column": True},
+        {"column": "id", "sql": "SELECT 0"},
+        {"type": "foreign_key", "reference": {}},
+        {
+            "type": "foreign_key",
+            "reference": {"table": "public.customers", "column": "id", "where": "true"},
+        },
+        {"type": "foreign_key", "reference": {"table": "pg_catalog.pg_class", "column": "oid"}},
+    ],
+)
+def test_invalid_profile_rules_are_rejected_before_backup_or_docker(tmp_path, monkeypatch, change):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    profile = validation_profile()
+    profile["invariants"][0].update(change)
+    path = tmp_path / "profile.json"
+    path.write_text(json.dumps(profile))
+    output = tmp_path / "plan.json"
+    with pytest.raises(ValueError):
+        restore.create_restore_plan(tmp_path / "missing.dump", output, validation_profile=path)
+    assert commands == []
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"apiVersion": "nostekon/validation-profile/v999"},
+        {"kind": "Approval"},
+        {"sql": "SELECT 0"},
+        {"invariants": []},
+        {"invariants": {}},
+        {"invariants": validation_profile()["invariants"][:1] * 2},
+        {"invariants": validation_profile()["invariants"][:1] * 21},
+    ],
+)
+def test_profile_rejects_unsupported_shapes_and_duplicate_names(tmp_path, change):
+    profile = validation_profile()
+    profile.update(change)
+    path = tmp_path / "profile.json"
+    path.write_text(json.dumps(profile))
+    with pytest.raises(ValueError):
+        restore.load_validation_profile(path)
+
+
+def test_v2_plan_loader_revalidates_embedded_rules(tmp_path, monkeypatch):
+    monkeypatch.setattr(restore, "docker_command", fake_docker([]))
+    backup = tmp_path / "backup.dump"
+    backup.write_bytes(b"PGDMPfixture")
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(validation_profile()))
+    output = tmp_path / "plan.json"
+    plan = restore.create_restore_plan(backup, output, validation_profile=profile)
+    plan["invariants"][0]["column"] = "id; SELECT 1"
+    output.write_text(json.dumps(plan))
+    with pytest.raises(ValueError):
+        restore.load_restore_plan(output)
 
 
 def test_restore_is_isolated_and_reports_only_measured_checks(tmp_path, monkeypatch):
