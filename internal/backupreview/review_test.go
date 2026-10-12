@@ -133,6 +133,123 @@ func TestRejectsAmbiguousOrUnsafePlans(t *testing.T) {
 	}
 }
 
+func TestSemanticPlansRejectInvalidDefinitions(t *testing.T) {
+	planData, evidenceData := validFixture(t, true)
+	for _, change := range []struct{ name, before, after string }{
+		{"missing counts", `"tables":{"public.orders":3}`, `"tables":{}`},
+		{"empty rules", `[{"column":"id","name":"orders-id","table":"public.orders","type":"not_null"}]`, `[]`},
+		{"bad rule name", `"name":"orders-id"`, `"name":"Orders-ID"`},
+		{"bad rule type", `"type":"not_null"`, `"type":"sql"`},
+		{"system scope", `"table":"public.orders"`, `"table":"pg_catalog.orders"`},
+		{"null column", `"column":"id"`, `"column":null`},
+		{"unknown rule field", `"column":"id"`, `"column":"id","sql":"SELECT 1"`},
+		{"reference on non-FK", `"column":"id"`, `"column":"id","reference":null`},
+		{"missing FK reference", `"type":"not_null"`, `"type":"foreign_key"`},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			altered := bytes.Replace(planData, []byte(change.before), []byte(change.after), 1)
+			if bytes.Equal(altered, planData) {
+				t.Fatal("test mutation did not change the plan")
+			}
+			if _, err := Evaluate(altered, evidenceData); err == nil {
+				t.Fatal("invalid semantic definition accepted")
+			}
+		})
+	}
+	var declared map[string]any
+	if err := json.Unmarshal(planData, &declared); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"unique", "foreign_key"} {
+		rule := map[string]any{"name": "orders-id", "type": kind, "table": "public.orders", "column": "id"}
+		if kind == "foreign_key" {
+			rule["reference"] = map[string]any{"table": "public.customers", "column": "id"}
+		}
+		declared["invariants"] = []any{rule}
+		encoded, err := json.Marshal(declared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := parsePlan(encoded); err != nil {
+			t.Fatal(err)
+		}
+		declared["invariants"] = []any{rule, rule}
+		encoded, _ = json.Marshal(declared)
+		if _, _, err := parsePlan(encoded); err == nil {
+			t.Fatal("duplicate rules accepted")
+		}
+	}
+}
+
+func TestConsistentFailedCapturesDoNotPassTheGate(t *testing.T) {
+	for _, failure := range []struct {
+		name, detail string
+		index        int
+		complete     bool
+	}{
+		{"count mismatch", "expected 3; measured 2", 6, true},
+		{"semantic violation", "not_null: public.orders.id; measured violations: 1; expected 0", 7, true},
+		{"query failed", "not_null: public.orders.id; query failed; no raw database output retained", 7, false},
+		{"not evaluated", "not_null: public.orders.id; not evaluated because the rehearsal did not reach validation", 7, false},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			planData, evidenceData := validFixture(t, true)
+			var captured map[string]any
+			if err := json.Unmarshal(evidenceData, &captured); err != nil {
+				t.Fatal(err)
+			}
+			checks := captured["status"].(map[string]any)["checks"].([]any)
+			check := checks[failure.index].(map[string]any)
+			check["passed"], check["detail"] = false, failure.detail
+			altered, err := json.Marshal(captured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			review, err := Evaluate(planData, altered)
+			if err != nil || review.Passed || !review.EvidenceMatches || review.Complete != failure.complete || review.Report.Verdict != "failed" {
+				t.Fatalf("failure was not reviewed honestly: passed=%v matches=%v complete=%v issues=%v error=%v", review.Passed, review.EvidenceMatches, review.Complete, review.Issues, err)
+			}
+		})
+	}
+}
+
+func TestMissingDuplicateAndExtraChecksCannotPass(t *testing.T) {
+	for _, mutation := range []string{"missing count", "duplicate count", "extra count", "missing cleanup", "duplicate binding", "extra rule"} {
+		t.Run(mutation, func(t *testing.T) {
+			planData, evidenceData := validFixture(t, true)
+			var captured map[string]any
+			if err := json.Unmarshal(evidenceData, &captured); err != nil {
+				t.Fatal(err)
+			}
+			status := captured["status"].(map[string]any)
+			checks := status["checks"].([]any)
+			switch mutation {
+			case "missing count":
+				checks = append(checks[:6], checks[7:]...)
+			case "duplicate count":
+				checks = append(checks, checks[6])
+			case "extra count":
+				checks = append(checks, map[string]any{"level": "V3", "name": "Row count: public.extra", "passed": true, "detail": "expected 0; measured 0"})
+			case "missing cleanup":
+				checks = append(checks[:5], checks[6:]...)
+			case "duplicate binding":
+				checks = append(checks, checks[2])
+			case "extra rule":
+				checks = append(checks, map[string]any{"level": "V4", "name": "extra-rule", "passed": true, "detail": "not_null: public.orders.id; measured violations: 0; expected 0"})
+			}
+			status["checks"] = checks
+			altered, err := json.Marshal(captured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			review, err := Evaluate(planData, altered)
+			if err == nil && (review.Passed || review.EvidenceMatches || len(review.Issues) == 0) {
+				t.Fatalf("ambiguous capture accepted: %v", review.Issues)
+			}
+		})
+	}
+}
+
 func TestRejectsEvidenceDriftAndContradictoryMeasurements(t *testing.T) {
 	planData, evidenceData := validFixture(t, true)
 	changes := []struct{ name, before, after string }{

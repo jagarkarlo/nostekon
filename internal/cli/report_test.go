@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -36,6 +37,73 @@ func TestBackupPlanModeRoutesMissingInputToAdmissionError(t *testing.T) {
 	var output, problems bytes.Buffer
 	if code := Run([]string{"--backup-plan", "missing-plan.json", "run.json"}, &output, &problems); code != 2 || !strings.Contains(problems.String(), "read backup plan:") || output.Len() != 0 {
 		t.Fatalf("gate did not route missing plan: %d %s", code, problems.String())
+	}
+}
+
+func TestBackupPlanInputRejectsUnsafeFiles(t *testing.T) {
+	directory := t.TempDir()
+	for name, contents := range map[string][]byte{"empty.json": {}, "large.json": bytes.Repeat([]byte("x"), 16385), "invalid.json": []byte(`{}`)} {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+		var output, problems bytes.Buffer
+		if code := Run([]string{"--backup-plan", path, path}, &output, &problems); code != 2 || output.Len() != 0 {
+			t.Fatalf("invalid input accepted: %s %d %s", name, code, problems.String())
+		}
+	}
+	link := filepath.Join(directory, "link.json")
+	if err := os.Symlink(filepath.Join(directory, "invalid.json"), link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readBackupInput(link, 16384); err == nil {
+		t.Fatal("symlink accepted")
+	}
+	if _, err := readBackupInput(directory, 16384); err == nil {
+		t.Fatal("directory accepted")
+	}
+	if tool, err := exec.LookPath("mkfifo"); err == nil {
+		fifo := filepath.Join(directory, "input.fifo")
+		if err := exec.Command(tool, fifo).Run(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readBackupInput(fifo, 16384); err == nil {
+			t.Fatal("FIFO accepted")
+		}
+	}
+	var output, problems bytes.Buffer
+	if code := Run([]string{"--backup-plan", "", "run.json"}, &output, &problems); code != 2 || output.Len() != 0 {
+		t.Fatal("empty explicit plan silently fell back to regular report mode")
+	}
+}
+
+type failingReviewWriter struct{}
+
+func (failingReviewWriter) Write(data []byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestBackupPlanModeReturnsReviewAndWriteFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plan.json")
+	planData := []byte(`{"apiVersion":"nostekon/restore-plan/v1alpha1","kind":"PostgreSQLRestorePlan","backup":{"sha256":"` + strings.Repeat("a", 64) + `","bytes":5},"imageId":"sha256:` + strings.Repeat("b", 64) + `","tables":{"public.orders":3},"timeoutSeconds":300}`)
+	if err := os.WriteFile(path, planData, 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--backup-plan", path, "../../studio/e2e/postgresql-plan-rehearsal.run.json"}
+	var output, problems bytes.Buffer
+	if code := Run(args, &output, &problems); code != 1 || problems.Len() != 0 {
+		t.Fatalf("mismatch review failed: %d %s", code, problems.String())
+	}
+	var review struct {
+		Kind            string
+		Passed          bool
+		EvidenceMatches bool
+		Issues          []string
+	}
+	if err := json.Unmarshal(output.Bytes(), &review); err != nil || review.Kind != "PostgreSQLBackupReview" || review.Passed || review.EvidenceMatches || len(review.Issues) == 0 {
+		t.Fatalf("invalid mismatch review: %+v %v", review, err)
+	}
+	problems.Reset()
+	if code := Run(args, failingReviewWriter{}, &problems); code != 2 || !strings.Contains(problems.String(), "write backup review:") {
+		t.Fatalf("output error: %d %s", code, problems.String())
 	}
 }
 
