@@ -1,0 +1,91 @@
+{
+  "apiVersion": "nostekon/v1alpha1",
+  "kind": "DrillRun",
+  "metadata": {
+    "name": "nostekon-backup-a02e0759da3c"
+  },
+  "spec": {
+    "scenario": "postgresql-backup-rehearsal",
+    "upTo": "V3"
+  },
+  "status": {
+    "failureAt": "2026-10-12T07:16:17.672051Z",
+    "completedAt": "2026-10-12T07:16:19.405064Z",
+    "phases": [
+      {
+        "name": "Create isolated target",
+        "startedAt": "2026-10-12T07:16:17.692123Z",
+        "endedAt": "2026-10-12T07:16:17.732848Z"
+      },
+      {
+        "name": "Start PostgreSQL",
+        "startedAt": "2026-10-12T07:16:17.881643Z",
+        "endedAt": "2026-10-12T07:16:18.935323Z"
+      },
+      {
+        "name": "Restore custom archive",
+        "startedAt": "2026-10-12T07:16:18.935348Z",
+        "endedAt": "2026-10-12T07:16:19.078882Z"
+      },
+      {
+        "name": "Database query",
+        "startedAt": "2026-10-12T07:16:19.078952Z",
+        "endedAt": "2026-10-12T07:16:19.189804Z"
+      },
+      {
+        "name": "Count public.orders",
+        "startedAt": "2026-10-12T07:16:19.189848Z",
+        "endedAt": "2026-10-12T07:16:19.300969Z"
+      },
+      {
+        "name": "Remove isolated target",
+        "startedAt": "2026-10-12T07:16:19.301098Z",
+        "endedAt": "2026-10-12T07:16:19.405026Z"
+      }
+    ],
+    "checks": [
+      {
+        "level": "V0",
+        "name": "Frozen custom archive",
+        "passed": true,
+        "detail": "SHA-256 2bf6cb193daa13b599c6a183c6657cdf2872f588bd0ddc73996ca2e4b449070e; 1587 bytes"
+      },
+      {
+        "level": "V0",
+        "name": "Pinned local PostgreSQL image",
+        "passed": true,
+        "detail": "sha256:2698c2096ca78a41ae7477580afb30fe36d5368564511b2ea593dbfb26401fdd"
+      },
+      {
+        "level": "V0",
+        "name": "Restore plan binding",
+        "passed": true,
+        "detail": "Canonical plan SHA-256 64734e75dcebce151bebd62d98eb9260461c12b4916d108680a57c044476139d; backup and image matched; not operator approval or authenticated provenance"
+      },
+      {
+        "level": "V1",
+        "name": "Archive restore completed",
+        "passed": true,
+        "detail": "pg_restore --exit-on-error --single-transaction"
+      },
+      {
+        "level": "V2",
+        "name": "Restored database query",
+        "passed": true,
+        "detail": "SELECT 1 returned 1; not an application-health proof"
+      },
+      {
+        "level": "V3",
+        "name": "Row count: public.orders",
+        "passed": true,
+        "detail": "expected 3; measured 3"
+      },
+      {
+        "level": "V2",
+        "name": "Isolated target removed",
+        "passed": true,
+        "detail": "nostekon-backup-a02e0759da3c"
+      }
+    ]
+  }
+}

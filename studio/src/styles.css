@@ -296,6 +296,7 @@ button.finding:hover { filter: brightness(1.12); }
 .check-list li.fail svg { color: var(--bad); }
 .check-name { font-weight: 600; }
 .check-detail { overflow: hidden; color: var(--ink-3); font: 12px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.check-detail.plan-binding-detail { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
 .chip { padding: 1px 7px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-2); font-size: 11px; }
 
 .timeline { --label-w: 190px; position: relative; display: grid; gap: 6px; margin: 16px 16px 14px; padding-bottom: 22px; }

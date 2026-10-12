@@ -488,7 +488,7 @@ function LevelDetail({ level }: { level: LevelResult }) {
             <li key={index} className={check.passed ? "pass" : "fail"}>
               {check.passed ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
               <span className="check-name">{check.name}</span>
-              {check.detail && <span className="check-detail">{check.detail}</span>}
+              {check.detail && <span className={`check-detail${check.name === "Restore plan binding" ? " plan-binding-detail" : ""}`}>{check.detail}</span>}
               {check.source === "ledger" && <span className="chip">computed</span>}
             </li>
           ))}

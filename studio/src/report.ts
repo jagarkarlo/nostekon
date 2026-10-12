@@ -178,6 +178,10 @@ export function reportMarkdown(report: Report): string {
     const checks = level.checks.map((check) => `${check.passed ? "✓" : "✗"} ${check.name}`).join("; ") || "not checked";
     lines.push(`| ${level.id}${level.inScope ? "" : " (out of scope)"} | ${level.question} | ${statusMark[level.status]} | ${checks.replaceAll("|", "\\|")} |`);
   }
+  if (rehearsal) {
+    const binding = report.levels.flatMap(level => level.checks).find(check => check.name === "Restore plan binding");
+    if (binding?.detail) lines.push("", "## Restore Plan Binding", "", binding.detail);
+  }
   if (report.rto && report.rto.phases.length > 0) {
     lines.push("", "| Phase | Starts at | Duration |", "| --- | --- | --- |");
     for (const phase of report.rto.phases) {

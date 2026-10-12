@@ -320,7 +320,7 @@ for (const width of [390, 1440]) {
     await expect(page.locator(".sample-caveat")).toContainText("disposable local PostgreSQL restore");
     await expect(page.locator(".sample-caveat")).not.toContainText("two-cluster");
     await page.goto(process.env.NOSTEKON_APP_URL ? "/#/runs" : "/demo/#/runs");
-    const original = await readFile(new URL("../../examples/runs/postgresql-backup-rehearsal.run.json", import.meta.url));
+    const original = await readFile(new URL("./postgresql-plan-rehearsal.run.json", import.meta.url));
     await page.getByTestId("run-evidence-input").setInputFiles({ name: "backup-rehearsal.json", mimeType: "application/json", buffer: original });
     await expect(page.getByRole("heading", { name: "Verified to V3" })).toBeVisible();
     await expect(page.getByRole("status", { name: "Backup rehearsal scope" })).toContainText("not incident RTO");
@@ -331,6 +331,8 @@ for (const width of [390, 1440]) {
     await page.getByTitle("Download the evidence summary as Markdown", { exact: true }).click();
     const markdown = await readFile((await (await markdownDownload).path())!, "utf8");
     expect(markdown).toContain("Rehearsal duration:");
+    expect(markdown).toContain("Restore plan binding");
+    expect(markdown).toContain("not operator approval");
     expect(markdown).not.toContain("Failure injected:");
     await page.getByRole("button", { name: "Save run", exact: true }).click();
     await page.getByRole("link", { name: "Runs", exact: true }).click();
@@ -341,7 +343,13 @@ for (const width of [390, 1440]) {
     expect(await readFile((await (await originalDownload).path())!)).toEqual(original);
     await page.getByRole("button", { name, exact: true }).click();
     await expect(page.getByRole("status", { name: "Backup rehearsal scope" })).toBeVisible();
+    await page.getByRole("button", { name: /^V0/ }).click();
+    await expect(page.getByText("Restore plan binding", { exact: true })).toBeVisible();
+    const binding = page.getByText(/^Canonical plan SHA-256/);
+    await expect(binding).toContainText("not operator approval or authenticated provenance");
+    expect(await binding.evaluate(detail => detail.scrollWidth <= detail.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: testInfo.outputPath(`backup-rehearsal-${width}.png`), fullPage: true });
   });
 
