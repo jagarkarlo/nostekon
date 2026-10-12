@@ -14,6 +14,7 @@ from uuid import uuid4
 from nostekon.lab import utc_timestamp
 
 MAX_BACKUP_BYTES = 64 * 1024 * 1024
+MAX_PLAN_BYTES = 16 * 1024
 
 
 def docker_command(arguments: list[str], *, timeout: float) -> bytes:
@@ -66,9 +67,7 @@ def docker_command(arguments: list[str], *, timeout: float) -> bytes:
             raise
 
 
-def execute_backup_restore(backup: Path, output: Path, *, tables=None, timeout=300) -> dict:
-    if sys.platform != "linux":
-        raise ValueError("backup rehearsal currently requires Linux and a local Docker daemon")
+def _restore_settings(tables, timeout) -> dict:
     if type(timeout) is not int or not 30 <= timeout <= 1800:
         raise ValueError("timeout must be a whole number between 30 and 1800 seconds")
     tables = {} if tables is None else dict(tables)
@@ -86,6 +85,125 @@ def execute_backup_restore(backup: Path, output: Path, *, tables=None, timeout=3
             )
         if type(count) is not int or not 0 <= count <= 2**63 - 1:
             raise ValueError("expected row count must be a nonnegative 64-bit integer")
+    return tables
+
+
+def _validate_plan(plan) -> dict:
+    if type(plan) is not dict or set(plan) != {
+        "apiVersion",
+        "kind",
+        "backup",
+        "imageId",
+        "tables",
+        "timeoutSeconds",
+    }:
+        raise ValueError("restore plan must contain exactly the versioned plan fields")
+    if (
+        plan["apiVersion"] != "nostekon/restore-plan/v1alpha1"
+        or plan["kind"] != "PostgreSQLRestorePlan"
+    ):
+        raise ValueError("unsupported restore plan version or kind")
+    backup = plan["backup"]
+    if type(backup) is not dict or set(backup) != {"sha256", "bytes"}:
+        raise ValueError("restore plan backup must contain only sha256 and bytes")
+    if (
+        not isinstance(backup["sha256"], str)
+        or not re.fullmatch(r"[a-f0-9]{64}", backup["sha256"])
+        or type(backup["bytes"]) is not int
+        or not 5 <= backup["bytes"] <= MAX_BACKUP_BYTES
+    ):
+        raise ValueError("restore plan backup digest or size is invalid")
+    if not isinstance(plan["imageId"], str) or not re.fullmatch(
+        r"sha256:[a-f0-9]{64}", plan["imageId"]
+    ):
+        raise ValueError("restore plan image must be an immutable local image ID")
+    if type(plan["tables"]) is not dict:
+        raise ValueError("restore plan tables must be an object")
+    _restore_settings(plan["tables"], plan["timeoutSeconds"])
+    return plan
+
+
+def load_restore_plan(path: Path) -> dict:
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("restore plan contains duplicate JSON fields")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("restore plan cannot contain nonfinite numbers")
+
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as handle:
+        metadata = os.fstat(handle.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= MAX_PLAN_BYTES:
+            raise ValueError("restore plan must be a regular file of at most 16 KiB")
+        payload = handle.read(MAX_PLAN_BYTES + 1)
+    if len(payload) > MAX_PLAN_BYTES:
+        raise ValueError("restore plan exceeds 16 KiB")
+    try:
+        plan = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=unique_fields,
+            parse_constant=invalid_constant,
+        )
+    except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
+        raise ValueError("restore plan must be bounded UTF-8 JSON") from error
+    return _validate_plan(plan)
+
+
+def create_restore_plan(backup: Path, output: Path, *, tables=None, timeout=300) -> dict:
+    if sys.platform != "linux":
+        raise ValueError("backup rehearsal currently requires Linux and a local Docker daemon")
+    tables = _restore_settings(tables, timeout)
+    with tempfile.TemporaryDirectory(prefix="nostekon-plan-") as directory:
+        snapshot = snapshot_backup(backup, Path(directory))
+        with snapshot.open("rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        image = (
+            docker_command(
+                ["image", "inspect", "--format={{.Id}}", "postgres:16.8"], timeout=timeout
+            )
+            .decode()
+            .strip()
+        )
+        plan = _validate_plan(
+            {
+                "apiVersion": "nostekon/restore-plan/v1alpha1",
+                "kind": "PostgreSQLRestorePlan",
+                "backup": {"sha256": digest, "bytes": snapshot.stat().st_size},
+                "imageId": image,
+                "tables": tables,
+                "timeoutSeconds": timeout,
+            }
+        )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=output.parent, prefix=".nostekon-plan-", delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        try:
+            json.dump(plan, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.link(temporary, output)
+            parent = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return plan
+
+
+def execute_backup_restore(backup: Path, output: Path, *, tables=None, timeout=300) -> dict:
+    if sys.platform != "linux":
+        raise ValueError("backup rehearsal currently requires Linux and a local Docker daemon")
+    tables = _restore_settings(tables, timeout)
     checks = []
     phases = []
     name = f"nostekon-backup-{uuid4().hex[:12]}"

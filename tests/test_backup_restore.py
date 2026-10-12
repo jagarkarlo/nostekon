@@ -54,6 +54,108 @@ def fake_docker(commands, *, fail_restore=False, fail_cleanup=False, count=b"3\n
     return execute
 
 
+def test_plan_binds_exact_backup_and_cached_image_without_restoring(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    source = tmp_path / "input.dump"
+    original = b"PGDMPcompleted backup"
+    source.write_bytes(original)
+    output = tmp_path / "restore-plan.json"
+    plan = restore.create_restore_plan(source, output, tables={"public.orders": 3}, timeout=90)
+    assert plan == {
+        "apiVersion": "nostekon/restore-plan/v1alpha1",
+        "kind": "PostgreSQLRestorePlan",
+        "backup": {"sha256": hashlib.sha256(original).hexdigest(), "bytes": len(original)},
+        "imageId": "sha256:" + "a" * 64,
+        "tables": {"public.orders": 3},
+        "timeoutSeconds": 90,
+    }
+    assert json.loads(output.read_text()) == plan
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert source.read_bytes() == original
+    assert commands == [["image", "inspect", "--format={{.Id}}", "postgres:16.8"]]
+    assert restore.load_restore_plan(output) == plan
+    with pytest.raises(FileExistsError):
+        restore.create_restore_plan(source, output)
+    assert json.loads(output.read_text()) == plan
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"apiVersion": "nostekon/restore-plan/v999"},
+        {"kind": "ProductionApproval"},
+        {"approved": True},
+        {"imageId": "postgres:latest"},
+        {"tables": {"public.orders": True}},
+        {"tables": {"pg_catalog.pg_class": 1}},
+        {"tables": []},
+        {"timeoutSeconds": True},
+        {"timeoutSeconds": 1801},
+        {"backup": {"sha256": "a" * 64, "bytes": True}},
+        {"backup": {"sha256": "a" * 63, "bytes": 12}},
+        {"backup": {"sha256": "a" * 64, "bytes": 12, "path": "/production"}},
+    ],
+)
+def test_plan_loader_rejects_unknown_fields_and_invalid_settings(tmp_path, monkeypatch, change):
+    monkeypatch.setattr(restore, "docker_command", fake_docker([]))
+    source = tmp_path / "backup.dump"
+    source.write_bytes(b"PGDMPfixture")
+    path = tmp_path / "plan.json"
+    plan = restore.create_restore_plan(source, path)
+    plan.update(change)
+    path.write_text(json.dumps(plan))
+    with pytest.raises(ValueError):
+        restore.load_restore_plan(path)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"kind":"PostgreSQLRestorePlan","kind":"PostgreSQLRestorePlan"}',
+        b'{"backup":{"bytes":12,"bytes":13}}',
+        b'{"timeoutSeconds":NaN}',
+        b"\xff",
+        b"{",
+        b"x" * 16385,
+        b"[" * 1100 + b"]" * 1100,
+    ],
+)
+def test_plan_loader_rejects_ambiguous_or_unbounded_json(tmp_path, payload):
+    path = tmp_path / "plan.json"
+    path.write_bytes(payload)
+    with pytest.raises(ValueError):
+        restore.load_restore_plan(path)
+
+
+def test_plan_loader_rejects_symlink_and_fifo(tmp_path):
+    source = tmp_path / "plan.json"
+    source.write_text("{}")
+    link = tmp_path / "linked.json"
+    link.symlink_to(source)
+    fifo = tmp_path / "pipe.json"
+    os.mkfifo(fifo)
+    for path in (link, fifo):
+        with pytest.raises((OSError, ValueError)):
+            restore.load_restore_plan(path)
+
+
+def test_plan_publication_failure_leaves_no_partial_plan(tmp_path, monkeypatch):
+    monkeypatch.setattr(restore, "docker_command", fake_docker([]))
+    source = tmp_path / "backup.dump"
+    source.write_bytes(b"PGDMPfixture")
+    output = tmp_path / "plan.json"
+
+    def fail_link(source, destination):
+        raise OSError("publication failed")
+
+    monkeypatch.setattr(restore.os, "link", fail_link)
+    with pytest.raises(OSError, match="publication failed"):
+        restore.create_restore_plan(source, output)
+    assert not output.exists()
+    assert list(tmp_path.glob(".nostekon-plan-*")) == []
+
+
 def test_restore_is_isolated_and_reports_only_measured_checks(tmp_path, monkeypatch):
     commands = []
     monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
