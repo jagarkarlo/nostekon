@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -7,6 +9,34 @@ from nostekon import __version__
 from nostekon.cli import main
 
 EXAMPLES = Path(__file__).parent.parent / "examples" / "drills"
+
+
+@pytest.mark.parametrize(
+    "element",
+    [
+        '<script type="module" src="/demo/assets/main.js"></script>',
+        '<link rel="stylesheet" href="/demo/assets/main.css">',
+        '<link rel="icon" href="/demo/assets/mark.svg">',
+    ],
+)
+def test_portable_builder_refuses_site_base_before_publication(tmp_path, monkeypatch, element):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    builder = scripts / "build-app.sh"
+    shutil.copyfile(Path(__file__).parent.parent / "scripts" / "build-app.sh", builder)
+    studio = tmp_path / "studio" / "dist"
+    studio.mkdir(parents=True)
+    (studio / "index.html").write_text(f"<!doctype html><html><head>{element}</head></html>")
+    output = tmp_path / "packages"
+    monkeypatch.setenv("NOSTEKON_VERSION", "dev")
+    monkeypatch.setenv("NOSTEKON_APP_TARGETS", "linux/amd64")
+    result = subprocess.run(
+        ["bash", str(builder), str(output)], capture_output=True, text=True, timeout=5, check=False
+    )
+    assert result.returncode == 2
+    assert "Site-base Studio build cannot be packaged" in result.stderr
+    assert "npm run build --prefix studio" in result.stderr
+    assert not output.exists()
 
 
 def test_version_command_prints_version(capsys: pytest.CaptureFixture[str]) -> None:

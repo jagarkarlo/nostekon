@@ -12,6 +12,10 @@ if [[ ! -f "$root/studio/dist/index.html" ]]; then
   printf '%s\n' 'Build Studio first: npm ci --prefix studio && npm run build --prefix studio' >&2
   exit 2
 fi
+if grep -q '/demo/assets/' "$root/studio/dist/index.html"; then
+  printf '%s\n' 'Site-base Studio build cannot be packaged. Rebuild: npm run build --prefix studio' >&2
+  exit 2
+fi
 if [[ -n "$(find "$root/studio/dist" -type l -print -quit)" ]]; then
   printf '%s\n' 'Studio build must not contain symlinks.' >&2
   exit 2
