@@ -20,12 +20,13 @@ def test_a_command_is_required() -> None:
     assert exit_info.value.code == 2
 
 
-def test_backup_restore_rejects_duplicate_expectations_before_execution(tmp_path, capsys):
+@pytest.mark.parametrize("action", ["restore", "plan"])
+def test_backup_restore_rejects_duplicate_expectations_before_execution(tmp_path, capsys, action):
     assert (
         main(
             [
                 "backup",
-                "restore",
+                action,
                 "--file",
                 str(tmp_path / "missing.dump"),
                 "--output",
@@ -67,6 +68,131 @@ def test_backup_restore_cli_exits_match_evidence(tmp_path, monkeypatch, capsys, 
     ) == int(failed)
     assert captured == [{"tables": {"public.orders": 3}, "timeout": 300}]
     assert "not measured" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("timeout_args, expected_timeout", [([], 300), (["--timeout", "90"], 90)])
+def test_backup_plan_cli_creates_plan_without_execution(
+    tmp_path, monkeypatch, capsys, timeout_args, expected_timeout
+):
+    from nostekon import backup_restore
+
+    captured = []
+
+    def create(backup, output, **kwargs):
+        captured.append((backup, output, kwargs))
+        return {}
+
+    monkeypatch.setattr(backup_restore, "create_restore_plan", create)
+    assert (
+        main(
+            [
+                "backup",
+                "plan",
+                "--file",
+                "backup.dump",
+                "--output",
+                str(tmp_path / "plan.json"),
+                "--expect-table",
+                "public.orders=3",
+                *timeout_args,
+            ]
+        )
+        == 0
+    )
+    assert captured == [
+        (
+            Path("backup.dump"),
+            tmp_path / "plan.json",
+            {"tables": {"public.orders": 3}, "timeout": expected_timeout},
+        )
+    ]
+    assert "not operator approval" in capsys.readouterr().out
+
+
+def test_planned_restore_cli_forwards_only_the_plan(tmp_path, monkeypatch):
+    from nostekon import backup_restore
+
+    captured = []
+
+    def execute(backup, output, **kwargs):
+        captured.append(kwargs)
+        return {"status": {"checks": [{"passed": True}]}}
+
+    monkeypatch.setattr(backup_restore, "execute_backup_restore", execute)
+    assert (
+        main(
+            [
+                "backup",
+                "restore",
+                "--file",
+                "backup.dump",
+                "--output",
+                str(tmp_path / "run.json"),
+                "--plan",
+                str(tmp_path / "plan.json"),
+            ]
+        )
+        == 0
+    )
+    assert captured == [{"plan": tmp_path / "plan.json"}]
+
+
+@pytest.mark.parametrize(
+    "failure,code",
+    [
+        (OSError("cannot read archive"), 2),
+        (RuntimeError("image unavailable"), 2),
+        (KeyboardInterrupt(), 130),
+    ],
+)
+def test_backup_plan_errors_restore_signal_handler(tmp_path, monkeypatch, failure, code):
+    import signal
+
+    from nostekon import backup_restore
+
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def fail(backup, output, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(backup_restore, "create_restore_plan", fail)
+    assert (
+        main(
+            [
+                "backup",
+                "plan",
+                "--file",
+                "backup.dump",
+                "--output",
+                str(tmp_path / "plan.json"),
+            ]
+        )
+        == code
+    )
+    assert signal.getsignal(signal.SIGTERM) == previous
+    assert not (tmp_path / "plan.json").exists()
+
+
+@pytest.mark.parametrize("override", [["--timeout", "300"], ["--expect-table", "public.orders=3"]])
+def test_planned_restore_cli_rejects_overrides_before_execution(tmp_path, capsys, override):
+    assert (
+        main(
+            [
+                "backup",
+                "restore",
+                "--file",
+                "missing.dump",
+                "--output",
+                str(tmp_path / "run.json"),
+                "--plan",
+                "missing-plan.json",
+                *override,
+            ]
+        )
+        == 2
+    )
+    assert "override" in capsys.readouterr().err
+    assert not (tmp_path / "run.json").exists()
 
 
 def test_levels_command_lists_all_levels(capsys: pytest.CaptureFixture[str]) -> None:

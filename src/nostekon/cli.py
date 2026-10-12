@@ -53,6 +53,44 @@ def _table_expectation(text: str) -> tuple[str, int]:
         raise argparse.ArgumentTypeError("expected schema.table=NONNEGATIVE_COUNT") from error
 
 
+def _backup_expectations(args: argparse.Namespace) -> dict:
+    tables = dict(args.expect_table)
+    if len(tables) != len(args.expect_table):
+        raise ValueError("duplicate table expectations are not allowed")
+    return tables
+
+
+def _cmd_backup_plan(args: argparse.Namespace) -> int:
+    from nostekon.backup_restore import create_restore_plan
+
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt("restore planning interrupted")
+
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        create_restore_plan(
+            Path(args.file),
+            Path(args.output),
+            tables=_backup_expectations(args),
+            timeout=args.timeout if args.timeout is not None else 300,
+        )
+        print(f"Recorded restore plan in {args.output}")
+        print(
+            "Input binding only; not operator approval or authenticated provenance. No restore ran."
+        )
+        return 0
+    except KeyboardInterrupt:
+        print(
+            "error: planning interrupted; inspect the plan output before retrying", file=sys.stderr
+        )
+        return 130
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _cmd_backup_restore(args: argparse.Namespace) -> int:
     from nostekon.backup_restore import execute_backup_restore
 
@@ -61,12 +99,19 @@ def _cmd_backup_restore(args: argparse.Namespace) -> int:
 
     previous = signal.signal(signal.SIGTERM, interrupt)
     try:
-        tables = dict(args.expect_table)
-        if len(tables) != len(args.expect_table):
-            raise ValueError("duplicate table expectations are not allowed")
-        result = execute_backup_restore(
-            Path(args.file), Path(args.output), tables=tables, timeout=args.timeout
-        )
+        if args.plan is not None:
+            if args.expect_table or args.timeout is not None:
+                raise ValueError("cannot override settings when --plan is supplied")
+            result = execute_backup_restore(
+                Path(args.file), Path(args.output), plan=Path(args.plan)
+            )
+        else:
+            result = execute_backup_restore(
+                Path(args.file),
+                Path(args.output),
+                tables=_backup_expectations(args),
+                timeout=args.timeout if args.timeout is not None else 300,
+            )
         print(f"Recorded backup rehearsal in {args.output}")
         print(
             "Local backup rehearsal only; incident RTO and acknowledged-write RPO are not measured."
@@ -332,22 +377,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     backup = commands.add_parser("backup", help="test real backup files in a local isolated target")
     backup_commands = backup.add_subparsers(dest="backup_command", required=True, metavar="ACTION")
+    backup_plan = backup_commands.add_parser(
+        "plan", help="bind backup bytes, cached image and expectations without restoring"
+    )
+    backup_plan.set_defaults(handler=_cmd_backup_plan)
     backup_restore = backup_commands.add_parser(
         "restore", help="restore a PostgreSQL custom archive; no production connection"
     )
+    for action in (backup_plan, backup_restore):
+        action.add_argument("--file", required=True, help="completed pg_dump -Fc archive, <=64 MiB")
+        action.add_argument("--output", required=True, help="new private JSON output file")
+        action.add_argument(
+            "--expect-table",
+            action="append",
+            default=[],
+            type=_table_expectation,
+            metavar="SCHEMA.TABLE=COUNT",
+            help="up to 20 snapshot-specific row-count expectations",
+        )
+        action.add_argument(
+            "--timeout", type=int, default=None, help="30..1800 seconds; default 300"
+        )
     backup_restore.add_argument(
-        "--file", required=True, help="completed pg_dump -Fc archive, <=64 MiB"
+        "--plan", help="strict restore plan; no expectation or timeout overrides"
     )
-    backup_restore.add_argument("--output", required=True, help="new private DrillRun JSON file")
-    backup_restore.add_argument(
-        "--expect-table",
-        action="append",
-        default=[],
-        type=_table_expectation,
-        metavar="SCHEMA.TABLE=COUNT",
-        help="up to 20 snapshot-specific row-count expectations",
-    )
-    backup_restore.add_argument("--timeout", type=int, default=300, help="30..1800 seconds")
     backup_restore.set_defaults(handler=_cmd_backup_restore)
 
     lab = commands.add_parser("lab", help="manage and run disposable k3d lab restore drills")
