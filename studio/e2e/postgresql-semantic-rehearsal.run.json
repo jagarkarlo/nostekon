@@ -1,0 +1,131 @@
+{
+  "apiVersion": "nostekon/v1alpha1",
+  "kind": "DrillRun",
+  "metadata": {
+    "name": "nostekon-backup-15834ccd2738"
+  },
+  "spec": {
+    "scenario": "postgresql-backup-rehearsal",
+    "upTo": "V4",
+    "v4Evidence": {
+      "invariants": [
+        "orders-id-required",
+        "orders-id-unique",
+        "orders-customer-exists"
+      ]
+    }
+  },
+  "status": {
+    "failureAt": "2026-10-12T07:46:14.443028Z",
+    "completedAt": "2026-10-12T07:46:16.450287Z",
+    "phases": [
+      {
+        "name": "Create isolated target",
+        "startedAt": "2026-10-12T07:46:14.462635Z",
+        "endedAt": "2026-10-12T07:46:14.509940Z"
+      },
+      {
+        "name": "Start PostgreSQL",
+        "startedAt": "2026-10-12T07:46:14.638144Z",
+        "endedAt": "2026-10-12T07:46:15.675230Z"
+      },
+      {
+        "name": "Restore custom archive",
+        "startedAt": "2026-10-12T07:46:15.675264Z",
+        "endedAt": "2026-10-12T07:46:15.820074Z"
+      },
+      {
+        "name": "Database query",
+        "startedAt": "2026-10-12T07:46:15.820126Z",
+        "endedAt": "2026-10-12T07:46:15.946177Z"
+      },
+      {
+        "name": "Count public.orders_bad",
+        "startedAt": "2026-10-12T07:46:15.946247Z",
+        "endedAt": "2026-10-12T07:46:16.056901Z"
+      },
+      {
+        "name": "Validate orders-id-required",
+        "startedAt": "2026-10-12T07:46:16.056957Z",
+        "endedAt": "2026-10-12T07:46:16.144721Z"
+      },
+      {
+        "name": "Validate orders-id-unique",
+        "startedAt": "2026-10-12T07:46:16.144776Z",
+        "endedAt": "2026-10-12T07:46:16.241932Z"
+      },
+      {
+        "name": "Validate orders-customer-exists",
+        "startedAt": "2026-10-12T07:46:16.241985Z",
+        "endedAt": "2026-10-12T07:46:16.354063Z"
+      },
+      {
+        "name": "Remove isolated target",
+        "startedAt": "2026-10-12T07:46:16.354159Z",
+        "endedAt": "2026-10-12T07:46:16.450232Z"
+      }
+    ],
+    "checks": [
+      {
+        "level": "V0",
+        "name": "Frozen custom archive",
+        "passed": true,
+        "detail": "SHA-256 6d9a0a2794de72ac5c986ccbfa9487c2d7c6a2e2935b27cb0916bac3bf092c50; 3323 bytes"
+      },
+      {
+        "level": "V0",
+        "name": "Pinned local PostgreSQL image",
+        "passed": true,
+        "detail": "sha256:2698c2096ca78a41ae7477580afb30fe36d5368564511b2ea593dbfb26401fdd"
+      },
+      {
+        "level": "V0",
+        "name": "Restore plan binding",
+        "passed": true,
+        "detail": "Canonical plan SHA-256 988df63edaa9bf7f3f749d22de856f23aec91dfcd167df4e1d5163a8ebb6e7e1; backup and image matched; not operator approval or authenticated provenance"
+      },
+      {
+        "level": "V1",
+        "name": "Archive restore completed",
+        "passed": true,
+        "detail": "pg_restore --exit-on-error --single-transaction"
+      },
+      {
+        "level": "V2",
+        "name": "Restored database query",
+        "passed": true,
+        "detail": "SELECT 1 returned 1; not an application-health proof"
+      },
+      {
+        "level": "V3",
+        "name": "Row count: public.orders_bad",
+        "passed": true,
+        "detail": "expected 3; measured 3"
+      },
+      {
+        "level": "V4",
+        "name": "orders-id-required",
+        "passed": false,
+        "detail": "not_null: public.orders_bad.id; measured violations: 1; expected 0"
+      },
+      {
+        "level": "V4",
+        "name": "orders-id-unique",
+        "passed": false,
+        "detail": "unique: public.orders_bad.id; measured violations: 1; expected 0"
+      },
+      {
+        "level": "V4",
+        "name": "orders-customer-exists",
+        "passed": false,
+        "detail": "foreign_key: public.orders_bad.customer_id -> public.customers.id; measured violations: 1; expected 0"
+      },
+      {
+        "level": "V2",
+        "name": "Isolated target removed",
+        "passed": true,
+        "detail": "nostekon-backup-15834ccd2738"
+      }
+    ]
+  }
+}

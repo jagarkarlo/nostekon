@@ -181,6 +181,14 @@ export function reportMarkdown(report: Report): string {
   if (rehearsal) {
     const binding = report.levels.flatMap(level => level.checks).find(check => check.name === "Restore plan binding");
     if (binding?.detail) lines.push("", "## Restore Plan Binding", "", binding.detail);
+    const semanticChecks = report.levels.find(level => level.id === "V4" && level.inScope)?.checks.filter(check => check.source === "reported") ?? [];
+    if (semanticChecks.length > 0) {
+      const cell = (value: string) => value.replaceAll("|", "\\|").replaceAll(/[\r\n]/g, " ");
+      lines.push("", "## Reported V4 Checks", "", "| Check | Result | Detail |", "| --- | --- | --- |");
+      for (const check of semanticChecks) {
+        lines.push(`| ${cell(check.name)} | ${check.passed ? "PASS" : "FAIL"} | ${cell(check.detail ?? "No detail reported")} |`);
+      }
+    }
   }
   if (report.rto && report.rto.phases.length > 0) {
     lines.push("", "| Phase | Starts at | Duration |", "| --- | --- | --- |");

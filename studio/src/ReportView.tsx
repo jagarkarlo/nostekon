@@ -395,7 +395,7 @@ function ReportBody({ report, onCopy, copied }: { report: Report; onCopy: () => 
         </div>
       </section>
 
-      {rehearsal && <div className="banner" role="status" aria-label="Backup rehearsal scope">Backup rehearsal timing, not incident RTO. Row counts do not prove application consistency or production readiness.</div>}
+      {rehearsal && <div className="banner" role="status" aria-label="Backup rehearsal scope">Backup rehearsal timing, not incident RTO. Selected checks do not prove complete application consistency or production readiness.</div>}
       <div className="metrics">
         <Metric label={rehearsal ? "Rehearsal duration" : "Recovery time"} value={formatDuration(report.rto?.seconds)} objective={report.rto?.objectiveSeconds ?? null} measured={report.rto?.seconds ?? null} met={report.rto?.met ?? null} />
         <Metric label="Data loss window" value={report.rpo ? formatDuration(report.rpo.seconds) : "—"} objective={report.rpo?.objectiveSeconds ?? null} measured={report.rpo?.seconds ?? null} met={report.rpo?.met ?? null} />
@@ -488,7 +488,7 @@ function LevelDetail({ level }: { level: LevelResult }) {
             <li key={index} className={check.passed ? "pass" : "fail"}>
               {check.passed ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
               <span className="check-name">{check.name}</span>
-              {check.detail && <span className={`check-detail${check.name === "Restore plan binding" ? " plan-binding-detail" : ""}`}>{check.detail}</span>}
+              {check.detail && <span className={`check-detail${check.name === "Restore plan binding" ? " plan-binding-detail" : ""}${level.id === "V4" && check.source === "reported" ? " semantic-check-detail" : ""}`}>{check.detail}</span>}
               {check.source === "ledger" && <span className="chip">computed</span>}
             </li>
           ))}

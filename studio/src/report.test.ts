@@ -135,6 +135,22 @@ describe("timelineBars", () => {
 });
 
 describe("reportMarkdown", () => {
+  it("exports full measured semantic scopes and failures without turning them into ledger proof", () => {
+    const checks = [
+      { name: "orders-id-required", passed: true, detail: "not_null: public.orders.id; measured violations: 0; expected 0", source: "reported" as const },
+      { name: "orders-customer-exists", passed: false, detail: "foreign_key: public.orders.customer_id -> public.customers.id; measured violations: 1; expected 0", source: "reported" as const },
+      { name: "computed-ledger", passed: true, detail: "ledger-only-detail", source: "ledger" as const },
+    ];
+    const markdown = reportMarkdown({ ...report, scenario: "postgresql-backup-rehearsal", levels: [
+      ...report.levels, { id: "V4", question: "Is the data correct?", evidence: "", status: "failed", inScope: true, checks },
+    ] });
+    expect(markdown).toContain("## Reported V4 Checks");
+    expect(markdown).toContain(`| orders-id-required | PASS | ${checks[0].detail} |`);
+    expect(markdown).toContain(`| orders-customer-exists | FAIL | ${checks[1].detail} |`);
+    expect(markdown).not.toContain("ledger-only-detail");
+    expect(markdown).not.toContain("- RPO:");
+  });
+
   it("summarizes verdict, levels and phases and escapes table pipes", () => {
     const markdown = reportMarkdown(report);
     expect(markdown).toContain("**Verdict:** FAILED.");

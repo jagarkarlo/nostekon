@@ -353,6 +353,41 @@ for (const width of [390, 1440]) {
     await page.screenshot({ path: testInfo.outputPath(`backup-rehearsal-${width}.png`), fullPage: true });
   });
 
+  test(`real semantic backup checks expose corruption despite matching counts at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(process.env.NOSTEKON_APP_URL ? "/#/runs" : "/demo/#/runs");
+    const original = await readFile(new URL("./postgresql-semantic-rehearsal.run.json", import.meta.url));
+    await page.getByTestId("run-evidence-input").setInputFiles({ name: "semantic-rehearsal.json", mimeType: "application/json", buffer: original });
+    await expect(page.getByRole("heading", { name: /^Failed at V4/ })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Backup rehearsal scope" })).toContainText("not incident RTO");
+    await expect(page.locator(".metric-sub", { hasText: "no write ledger" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Evidence provenance" })).toContainText("unverified");
+    const recorded = JSON.parse(original.toString());
+    const checks = recorded.status.checks.filter((check: { level: string }) => check.level === "V4");
+    for (const check of checks) {
+      const detail = page.getByText(check.detail, { exact: true });
+      await expect(detail).toBeVisible();
+      expect(await detail.evaluate(element => getComputedStyle(element).whiteSpace)).toBe("normal");
+      expect(await detail.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+    const markdownDownload = page.waitForEvent("download");
+    await page.getByTitle("Download the evidence summary as Markdown", { exact: true }).click();
+    const markdown = await readFile((await (await markdownDownload).path())!, "utf8");
+    expect(markdown).toContain("## Reported V4 Checks");
+    for (const check of checks) expect(markdown).toContain(`| ${check.name} | FAIL | ${check.detail} |`);
+    await page.getByRole("button", { name: /^V3/ }).click();
+    await expect(page.getByText("expected 3; measured 3", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /^V4/ }).click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: testInfo.outputPath(`semantic-rehearsal-${width}.png`), fullPage: true });
+    await page.getByRole("button", { name: "Save run", exact: true }).click();
+    await page.getByRole("link", { name: "Runs", exact: true }).click();
+    const originalDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: `Download evidence for ${recorded.metadata.name}`, exact: true }).click();
+    expect(await readFile((await (await originalDownload).path())!)).toEqual(original);
+  });
+
   test(`download page distinguishes real local artifacts from unpublished releases at ${width}px`, async ({ page }, testInfo) => {
     test.skip(!!process.env.NOSTEKON_APP_URL, "product route belongs to the static site");
     await page.setViewportSize({ width, height: 900 });
