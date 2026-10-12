@@ -484,7 +484,9 @@ Studio's **Plan review** tab uses the same independent Go gate in the browser or
 installed app. Attach the original plan, inspect completeness/binding separately
 from pass/fail, and export/import an exact-original plan/run/review ZIP. Imports
 verify integrity and calculate a fresh unverified review; cached verdicts never
-grant trust. Native offline portability is also available:
+grant trust. Explicitly saving a run preserves its original attached plan across
+reloads and original-only history backup/restore; reopening reviews it afresh.
+Native offline portability is also available:
 
 ```bash
 umask 077

@@ -131,16 +131,23 @@ host and port. Use the same address after restarting. Changing ports does not
 automatically migrate that library.
 
 In Runs, **Back up saved runs** exports `nostekon-runs.backup.json`: exact evidence
-and optional sidecars, with SHA-256 for both originals. **Restore run backup**
+and optional attestation sidecars and restore plans, each with its own SHA-256.
+Backups containing plans use `nostekon/run-backup/v2alpha1`; plan-free exports
+retain `v1alpha1`, and restore accepts both versions. Attached plans are bounded
+to 16 KiB each. **Restore run backup**
 validates hashes, asks for confirmation, evaluates every run, then saves the
 batch atomically. Invalid input, failed evaluation and quota/capacity failures do
 not partially replace the library. Existing evidence identities can be updated;
 other runs are not deleted. Backups are bounded to 64 MiB and 50 runs.
 
 Reports, sample labels, public keys, verification receipts and trust are not
-backed up. Restored evidence is Imported, even if originally an example.
+backed up; cached plan-review verdicts are not exported either. Reopening a run
+with an attached plan calculates a fresh review. Restored evidence is Imported,
+even if originally an example.
 Re-import authenticated public keys separately and make a fresh signature check.
-Unsigned backup updates preserve an existing sidecar. Saved suites and host-job
+Backup updates without a sidecar or plan preserve the corresponding existing
+attachment. To remove a plan, reopen the run, remove it and explicitly save.
+Saved suites and host-job
 history are separate; export their original files with existing controls. A run
 backup is not Import bundle or Import signed archive. Protect sensitive backups.
 

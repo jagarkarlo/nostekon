@@ -370,8 +370,12 @@ private key, credential or raw database output is added by the exporter.
 evaluates the original plan/run again. The cached review is never authoritative:
 even a forged passing receipt with updated checksums cannot upgrade the fresh
 verdict or provenance. Import does not grant signature trust or save anything
-automatically. The plan attachment lasts only in the current Report workspace;
-export a bundle to carry both originals across reloads or browser origins.
+automatically. **Save run** explicitly stores the exact attached plan alongside
+the original evidence in this browser. Reopening it calculates a fresh plan
+review, not a cached verdict. Save again after removing or replacing a plan.
+Runs can download the original plan or back up and restore attached originals
+across browser origins. Export a bundle to share the plan/run/review inventory;
+it is separate from the saved-run history backup.
 
 The native report binary supports the same offline round-trip. Use a new output
 filename; the Bash shell below prevents overwrites and creates private files:
