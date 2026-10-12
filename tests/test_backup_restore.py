@@ -529,6 +529,64 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
             )
             == 1
         )
+        planned_runs = []
+        for expected, exit_code, verdict in [(3, 0, "verified"), (4, 1, "failed")]:
+            plan_path = tmp_path / f"plan-{expected}.json"
+            planned_output = tmp_path / f"planned-{expected}.json"
+            assert (
+                main(
+                    [
+                        "backup",
+                        "plan",
+                        "--file",
+                        str(backup),
+                        "--output",
+                        str(plan_path),
+                        "--expect-table",
+                        f"public.orders={expected}",
+                    ]
+                )
+                == 0
+            )
+            assert (
+                main(
+                    [
+                        "backup",
+                        "restore",
+                        "--file",
+                        str(backup),
+                        "--output",
+                        str(planned_output),
+                        "--plan",
+                        str(plan_path),
+                    ]
+                )
+                == exit_code
+            )
+            recorded = json.loads(planned_output.read_text())
+            assert any(
+                check["name"] == "Restore plan binding" and check["passed"]
+                for check in recorded["status"]["checks"]
+            )
+            planned_runs.append((planned_output, exit_code, verdict))
+        backup.write_bytes(backup.read_bytes() + b"changed after planning")
+        rejected_output = tmp_path / "rejected.json"
+        assert (
+            main(
+                [
+                    "backup",
+                    "restore",
+                    "--file",
+                    str(backup),
+                    "--output",
+                    str(rejected_output),
+                    "--plan",
+                    str(tmp_path / "plan-3.json"),
+                ]
+            )
+            == 2
+        )
+        assert not rejected_output.exists()
         report_binary = tmp_path / "report"
         repository = Path(__file__).parent.parent
         subprocess.run(
@@ -537,7 +595,11 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
             check=True,
             timeout=60,
         )
-        for source, exit_code, verdict in [(passing, 0, "verified"), (failing, 1, "failed")]:
+        for source, exit_code, verdict in [
+            (passing, 0, "verified"),
+            (failing, 1, "failed"),
+            *planned_runs,
+        ]:
             evaluation = subprocess.run(
                 [str(report_binary), str(source)], capture_output=True, timeout=15
             )
