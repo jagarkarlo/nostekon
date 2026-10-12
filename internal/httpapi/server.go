@@ -41,7 +41,7 @@ func NewHandlerWithLab(configuredKeys map[string]ed25519.PublicKey, studio fs.FS
 		writer.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(writer).Encode(map[string]any{
 			"build":        buildinfo.Current(),
-			"capabilities": map[string]bool{"studio": studio != nil, "labExecution": lab != nil, "signatureVerification": true},
+			"capabilities": map[string]bool{"studio": studio != nil, "labExecution": lab != nil, "signatureVerification": true, "backupReview": true},
 		})
 	})
 	mux.HandleFunc("GET /api/v1/schemas/drillrun", func(writer http.ResponseWriter, _ *http.Request) {
@@ -55,6 +55,7 @@ func NewHandlerWithLab(configuredKeys map[string]ed25519.PublicKey, studio fs.FS
 	mux.HandleFunc("POST /api/v1/runs/report", func(writer http.ResponseWriter, request *http.Request) {
 		runReportHandler(writer, request, trustedKeys)
 	})
+	registerBackupRoutes(mux)
 	registerLabRoutes(mux, lab)
 	if studio != nil {
 		files := http.FileServer(http.FS(studio))

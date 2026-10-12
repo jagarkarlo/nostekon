@@ -1,0 +1,16 @@
+{
+  "apiVersion": "nostekon/restore-plan/v2alpha1",
+  "kind": "PostgreSQLRestorePlan",
+  "backup": {
+    "sha256": "6d9a0a2794de72ac5c986ccbfa9487c2d7c6a2e2935b27cb0916bac3bf092c50",
+    "bytes": 3323
+  },
+  "imageId": "sha256:2698c2096ca78a41ae7477580afb30fe36d5368564511b2ea593dbfb26401fdd",
+  "tables": { "public.orders_bad": 3 },
+  "timeoutSeconds": 300,
+  "invariants": [
+    { "name": "orders-id-required", "type": "not_null", "table": "public.orders_bad", "column": "id" },
+    { "name": "orders-id-unique", "type": "unique", "table": "public.orders_bad", "column": "id" },
+    { "name": "orders-customer-exists", "type": "foreign_key", "table": "public.orders_bad", "column": "customer_id", "reference": { "table": "public.customers", "column": "id" } }
+  ]
+}
