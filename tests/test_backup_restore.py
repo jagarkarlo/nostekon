@@ -850,6 +850,55 @@ def validation_profile():
     }
 
 
+@pytest.mark.parametrize(
+    "filename,keys,references,counts,rule_count",
+    [
+        (
+            "orders.json",
+            {("public.customers", "id"), ("public.orders", "id")},
+            {("public.orders", "customer_id", "public.customers", "id")},
+            {"public.customers": 2, "public.orders": 3},
+            6,
+        ),
+        (
+            "inventory.json",
+            {("public.products", "id"), ("public.warehouses", "id"), ("public.stock", "id")},
+            {
+                ("public.stock", "product_id", "public.products", "id"),
+                ("public.stock", "warehouse_id", "public.warehouses", "id"),
+            },
+            {"public.products": 2, "public.warehouses": 2, "public.stock": 3},
+            10,
+        ),
+    ],
+)
+def test_example_validation_profiles_cover_required_keys_and_references(
+    tmp_path, monkeypatch, filename, keys, references, counts, rule_count
+):
+    profile = Path(__file__).parents[1] / "examples" / "validation-profiles" / filename
+    rules = restore.load_validation_profile(profile)
+    assert len(rules) == rule_count
+    assert {(rule["table"], rule["column"]) for rule in rules if rule["type"] == "unique"} == keys
+    required = keys | {(table, column) for table, column, _, _ in references}
+    assert {
+        (rule["table"], rule["column"]) for rule in rules if rule["type"] == "not_null"
+    } == required
+    assert {
+        (rule["table"], rule["column"], rule["reference"]["table"], rule["reference"]["column"])
+        for rule in rules
+        if rule["type"] == "foreign_key"
+    } == references
+    commands = []
+    monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
+    backup = tmp_path / "backup.dump"
+    backup.write_bytes(b"PGDMPsynthetic profile admission fixture")
+    plan_path = tmp_path / "plan.json"
+    plan = restore.create_restore_plan(backup, plan_path, tables=counts, validation_profile=profile)
+    assert plan["invariants"] == rules
+    assert restore.load_restore_plan(plan_path) == plan
+    assert commands == [["image", "inspect", "--format={{.Id}}", "postgres:16.8"]]
+
+
 def test_validation_profile_is_frozen_inside_v2_plan_without_execution(tmp_path, monkeypatch):
     commands = []
     monkeypatch.setattr(restore, "docker_command", fake_docker(commands))
@@ -1463,13 +1512,28 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
                 "ON_ERROR_STOP=1",
                 "-c",
                 "CREATE TABLE public.orders(id integer PRIMARY KEY, customer_id integer); "
-                "INSERT INTO public.orders VALUES (1,1),(2,2),(3,NULL); "
+                "INSERT INTO public.orders VALUES (1,1),(2,2),(3,1); "
                 "CREATE TABLE public.customers(id integer PRIMARY KEY); "
                 "INSERT INTO public.customers VALUES (1),(2); "
                 "CREATE TABLE public.orders_bad(id integer, customer_id integer); "
                 "INSERT INTO public.orders_bad VALUES (1,99),(1,1),(NULL,NULL); "
                 "CREATE TABLE public.nullable(id integer, customer_id integer); "
-                "INSERT INTO public.nullable VALUES (NULL,NULL),(NULL,NULL),(NULL,NULL);",
+                "INSERT INTO public.nullable VALUES (NULL,NULL),(NULL,NULL),(NULL,NULL); "
+                "CREATE TABLE public.customers_bad(id integer); "
+                "INSERT INTO public.customers_bad VALUES (1),(1); "
+                "CREATE TABLE public.products(id integer); "
+                "INSERT INTO public.products VALUES (1),(2); "
+                "CREATE TABLE public.warehouses(id integer); "
+                "INSERT INTO public.warehouses VALUES (1),(2); "
+                "CREATE TABLE public.stock(id integer, product_id integer, warehouse_id integer); "
+                "INSERT INTO public.stock VALUES (1,1,1),(2,2,2),(3,1,2); "
+                "CREATE TABLE public.products_bad(id integer); "
+                "INSERT INTO public.products_bad VALUES (1),(1); "
+                "CREATE TABLE public.warehouses_bad(id integer); "
+                "INSERT INTO public.warehouses_bad VALUES (1),(NULL); "
+                "CREATE TABLE public.stock_bad "
+                "(id integer, product_id integer, warehouse_id integer); "
+                "INSERT INTO public.stock_bad VALUES (1,1,99),(1,99,1),(NULL,NULL,NULL);",
             ],
             timeout=10,
         )
@@ -1686,6 +1750,87 @@ def test_real_custom_backup_restore_and_independent_go_report(tmp_path):
                     scenario in ("good", "violations", "nulls-ignored"),
                 )
             )
+        examples = Path(__file__).parents[1] / "examples" / "validation-profiles"
+        for filename, counts, violations in [
+            (
+                "orders.json",
+                {"public.customers": 2, "public.orders": 3},
+                {
+                    "customers-id-unique",
+                    "orders-id-required",
+                    "orders-id-unique",
+                    "orders-customer-required",
+                    "orders-customer-exists",
+                },
+            ),
+            (
+                "inventory.json",
+                {"public.products": 2, "public.warehouses": 2, "public.stock": 3},
+                {
+                    "products-id-unique",
+                    "warehouses-id-required",
+                    "stock-id-required",
+                    "stock-id-unique",
+                    "stock-product-required",
+                    "stock-product-exists",
+                    "stock-warehouse-required",
+                    "stock-warehouse-exists",
+                },
+            ),
+        ]:
+            for broken in [False, True]:
+                scenario = f"example-{Path(filename).stem}-{'broken' if broken else 'good'}"
+                profile = json.loads((examples / filename).read_text())
+                expected_counts = counts
+                if broken:
+                    expected_counts = {table + "_bad": count for table, count in counts.items()}
+                    for rule in profile["invariants"]:
+                        rule["table"] += "_bad"
+                        if rule["type"] == "foreign_key":
+                            rule["reference"]["table"] += "_bad"
+                profile_path = tmp_path / f"{scenario}-profile.json"
+                profile_path.write_text(json.dumps(profile))
+                plan_path = tmp_path / f"{scenario}-plan.json"
+                run_path = tmp_path / f"{scenario}-v4.json"
+                plan = restore.create_restore_plan(
+                    backup, plan_path, tables=expected_counts, validation_profile=profile_path
+                )
+                assert plan["invariants"] == profile["invariants"]
+                exit_code = 1 if broken else 0
+                assert (
+                    main(
+                        [
+                            "backup",
+                            "restore",
+                            "--file",
+                            str(backup),
+                            "--plan",
+                            str(plan_path),
+                            "--output",
+                            str(run_path),
+                        ]
+                    )
+                    == exit_code
+                )
+                recorded = json.loads(run_path.read_text())
+                counts_checked = [
+                    check for check in recorded["status"]["checks"] if check["level"] == "V3"
+                ]
+                assert len(counts_checked) == len(expected_counts)
+                assert {check["name"] for check in counts_checked} == {
+                    f"Row count: {table}" for table in expected_counts
+                }
+                assert all(check["passed"] for check in counts_checked)
+                checks = [check for check in recorded["status"]["checks"] if check["level"] == "V4"]
+                assert [check["name"] for check in checks] == [
+                    rule["name"] for rule in profile["invariants"]
+                ]
+                assert {check["name"] for check in checks if not check["passed"]} == (
+                    violations if broken else set()
+                )
+                assert all("measured violations:" in check["detail"] for check in checks)
+                semantic_runs.append((run_path, exit_code, "failed" if broken else "verified"))
+                backup_reviews.append((plan_path, run_path, exit_code, True))
         backup.write_bytes(backup.read_bytes() + b"changed after planning")
         rejected_output = tmp_path / "rejected.json"
         assert (

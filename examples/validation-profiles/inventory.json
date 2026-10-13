@@ -1,0 +1,28 @@
+{
+  "apiVersion": "nostekon/validation-profile/v1alpha1",
+  "kind": "PostgreSQLValidationProfile",
+  "invariants": [
+    { "name": "products-id-required", "type": "not_null", "table": "public.products", "column": "id" },
+    { "name": "products-id-unique", "type": "unique", "table": "public.products", "column": "id" },
+    { "name": "warehouses-id-required", "type": "not_null", "table": "public.warehouses", "column": "id" },
+    { "name": "warehouses-id-unique", "type": "unique", "table": "public.warehouses", "column": "id" },
+    { "name": "stock-id-required", "type": "not_null", "table": "public.stock", "column": "id" },
+    { "name": "stock-id-unique", "type": "unique", "table": "public.stock", "column": "id" },
+    { "name": "stock-product-required", "type": "not_null", "table": "public.stock", "column": "product_id" },
+    {
+      "name": "stock-product-exists",
+      "type": "foreign_key",
+      "table": "public.stock",
+      "column": "product_id",
+      "reference": { "table": "public.products", "column": "id" }
+    },
+    { "name": "stock-warehouse-required", "type": "not_null", "table": "public.stock", "column": "warehouse_id" },
+    {
+      "name": "stock-warehouse-exists",
+      "type": "foreign_key",
+      "table": "public.stock",
+      "column": "warehouse_id",
+      "reference": { "table": "public.warehouses", "column": "id" }
+    }
+  ]
+}

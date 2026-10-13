@@ -1,0 +1,18 @@
+{
+  "apiVersion": "nostekon/validation-profile/v1alpha1",
+  "kind": "PostgreSQLValidationProfile",
+  "invariants": [
+    { "name": "customers-id-required", "type": "not_null", "table": "public.customers", "column": "id" },
+    { "name": "customers-id-unique", "type": "unique", "table": "public.customers", "column": "id" },
+    { "name": "orders-id-required", "type": "not_null", "table": "public.orders", "column": "id" },
+    { "name": "orders-id-unique", "type": "unique", "table": "public.orders", "column": "id" },
+    { "name": "orders-customer-required", "type": "not_null", "table": "public.orders", "column": "customer_id" },
+    {
+      "name": "orders-customer-exists",
+      "type": "foreign_key",
+      "table": "public.orders",
+      "column": "customer_id",
+      "reference": { "table": "public.customers", "column": "id" }
+    }
+  ]
+}
