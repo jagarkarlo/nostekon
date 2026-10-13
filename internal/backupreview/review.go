@@ -188,33 +188,8 @@ func parsePlan(data []byte) (plan, string, error) {
 		if len(restored.Invariants) < 1 || len(restored.Invariants) > 20 || len(restored.Tables) == 0 {
 			return restored, "", errors.New("semantic restore plan requires counts and 1..20 invariants")
 		}
-		var rawRules []map[string]json.RawMessage
-		if err := json.Unmarshal(fields["invariants"], &rawRules); err != nil {
+		if err := validateInvariants(fields["invariants"], restored.Invariants); err != nil {
 			return restored, "", err
-		}
-		seen := map[string]bool{}
-		for index, rule := range restored.Invariants {
-			foreign := rule.Type == "foreign_key"
-			_, hasReference := rawRules[index]["reference"]
-			fieldCount := 4
-			if foreign {
-				fieldCount++
-			}
-			ruleFields := []string{"name", "type", "table", "column"}
-			if foreign {
-				ruleFields = append(ruleFields, "reference")
-				if !exactFields(rawRules[index]["reference"], "table", "column") {
-					return restored, "", errors.New("foreign-key reference requires exact non-null fields")
-				}
-			}
-			ruleData, err := json.Marshal(rawRules[index])
-			if err != nil || !exactFields(ruleData, ruleFields...) {
-				return restored, "", errors.New("invariant requires exact non-null fields")
-			}
-			if len(rawRules[index]) != fieldCount || !ruleName.MatchString(rule.Name) || seen[rule.Name] || !validTable(rule.Table) || !identifier.MatchString(rule.Column) || rule.Type != "not_null" && rule.Type != "unique" && !foreign || hasReference != foreign || foreign && (rule.Reference == nil || !validTable(rule.Reference.Table) || !identifier.MatchString(rule.Reference.Column)) {
-				return restored, "", errors.New("invalid or duplicate restore plan invariant")
-			}
-			seen[rule.Name] = true
 		}
 	}
 	typed, err := json.Marshal(restored)

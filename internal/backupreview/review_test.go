@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,43 @@ func fixture(t *testing.T) ([]byte, []byte) {
 		t.Fatal(err)
 	}
 	return plan, data
+}
+
+func TestProfileInspectionUsesPublishedStarters(t *testing.T) {
+	for filename, count := range map[string]int{"orders": 6, "inventory": 10} {
+		data, err := os.ReadFile("../../examples/validation-profiles/" + filename + ".json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		review, err := InspectProfile(data)
+		if err != nil || !review.Valid || review.Kind != "PostgreSQLProfileReview" || len(review.Invariants) != count || review.ProfileSHA256 != digest(data) || len(review.Warnings) != 0 {
+			t.Fatalf("%s: %+v, %v", filename, review, err)
+		}
+		if len(review.Tables) != count/4+1 {
+			t.Fatalf("missing required relation coverage: %v", review.Tables)
+		}
+	}
+}
+
+func TestProfileInspectionRejectsAmbiguousInput(t *testing.T) {
+	valid := `{"apiVersion":"nostekon/validation-profile/v1alpha1","kind":"PostgreSQLValidationProfile","invariants":[{"name":"id-unique","type":"unique","table":"public.orders","column":"id"}]}`
+	for _, data := range []string{
+		"", "null", "[]", valid + "{}", strings.Repeat(" ", MaxPlanBytes+1),
+		strings.Replace(valid, `"kind":`, `"Kind":`, 1),
+		strings.Replace(valid, `"kind":`, `"kind":"extra","kind":`, 1),
+		strings.Replace(valid, `"public.orders"`, `"pg_catalog.pg_class"`, 1),
+		strings.Replace(valid, `"unique"`, `"sql"`, 1),
+		strings.Replace(valid, `"column":"id"`, `"column":null`, 1),
+		strings.Replace(valid, `"column":"id"`, `"column":"id","reference":null`, 1),
+	} {
+		if _, err := InspectProfile([]byte(data)); err == nil {
+			t.Fatalf("accepted unsafe profile: %.100s", data)
+		}
+	}
+	review, err := InspectProfile([]byte(valid))
+	if err != nil || len(review.Warnings) != 1 || !strings.Contains(review.Warnings[0], "null") {
+		t.Fatalf("nullable uniqueness omission not reported: %+v, %v", review, err)
+	}
 }
 
 func TestPassingEvidenceCannotBypassPlanFingerprint(t *testing.T) {
