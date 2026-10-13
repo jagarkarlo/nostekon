@@ -17,20 +17,35 @@ expected_assets=(/images/report-lab-dark.png /images/report-lab-light.png /image
   /demo/nostekon-browser.wasm /demo/wasm_exec.js)
 
 for route in "${expected_routes[@]}" "${docs_routes[@]}"; do
-  test -s "$site_dir/dist${route}index.html"
+  if ! test -s "$site_dir/dist${route}index.html"; then
+    printf 'Missing or empty site route: %s\n' "$site_dir/dist${route}index.html" >&2
+    exit 1
+  fi
 done
 for asset in "${expected_assets[@]}"; do
-  test -s "$site_dir/dist$asset"
+  if ! test -s "$site_dir/dist$asset"; then
+    printf 'Missing or empty site asset: %s\n' "$site_dir/dist$asset" >&2
+    exit 1
+  fi
 done
 
-for needle in \
-  'Find out whether a restore really worked' \
-  'What Nostekon is made of' \
-  'How deep did the recovery actually go' \
-  'Make one drill trustworthy' \
-  'Nostekon Studio' \
-  'Project overview'; do
-  grep -Rqs "$needle" "$site_dir/dist"
+content_routes=(/ /product/ /evidence/ /download/ /roadmap/ /demo/ /docs/)
+content_markers=(
+  'What a report tells you'
+  'Restore. Record. Review.'
+  'How deep did the recovery actually go'
+  'Download Nostekon'
+  'Make one drill trustworthy'
+  'Nostekon Studio'
+  'Project overview'
+)
+for index in "${!content_routes[@]}"; do
+  route=${content_routes[$index]}
+  needle=${content_markers[$index]}
+  if ! grep -Fq -- "$needle" "$site_dir/dist${route}index.html"; then
+    printf 'Missing site content in %s: %s\n' "$route" "$needle" >&2
+    exit 1
+  fi
 done
 
 printf '%s\n' 'Nostekon site route and asset checks passed.'
