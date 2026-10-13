@@ -48,7 +48,7 @@ func readBackupInput(path string, limit int64) ([]byte, error) {
 // Run evaluates a captured DrillRun file. The exported entry point is shared
 // by the standalone command and tests.
 func Run(args []string, stdout, stderr io.Writer) int {
-	usage := "usage: nostekon-report [--suite | --backup-plan PLAN.json [--export-backup-bundle] | --backup-bundle] [--attestation FILE --trusted-key PUBLIC.pem] [--pushgateway-url URL [--pushgateway-job NAME] [--pushgateway-instance NAME]] <run.json | suite-directory | evidence.zip>"
+	usage := "usage: nostekon-report [--validation-profile | --suite | --backup-plan PLAN.json [--export-backup-bundle] | --backup-bundle] [--attestation FILE --trusted-key PUBLIC.pem] [--pushgateway-url URL [--pushgateway-job NAME] [--pushgateway-instance NAME]] <profile.json | run.json | suite-directory | evidence.zip>"
 	if len(args) == 0 || len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Fprintln(stderr, usage)
 		if len(args) == 1 {
@@ -58,6 +58,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	flags := flag.NewFlagSet("nostekon-report", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	profileMode := flags.Bool("validation-profile", false, "inspect a semantic validation profile without database access or measurements")
 	suiteMode := flags.Bool("suite", false, "gate a captured PostgreSQL policy suite directory or evidence ZIP")
 	backupPlanPath := flags.String("backup-plan", "", "independently gate captured backup evidence against a reviewed restore plan")
 	backupBundleMode := flags.Bool("backup-bundle", false, "gate an original-only backup bundle offline with a freshly computed review")
@@ -74,6 +75,35 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if flags.NArg() != 1 || (*attestationPath == "") != (*trustedKeyPath == "") {
 		fmt.Fprintln(stderr, usage)
 		return 2
+	}
+	if *profileMode {
+		conflict := false
+		flags.Visit(func(option *flag.Flag) {
+			if option.Name != "validation-profile" {
+				conflict = true
+			}
+		})
+		if conflict {
+			fmt.Fprintln(stderr, "profile inspection cannot use evidence, signature, suite or metrics flags")
+			return 2
+		}
+		data, err := readBackupInput(flags.Arg(0), backupreview.MaxPlanBytes)
+		if err != nil {
+			fmt.Fprintf(stderr, "read validation profile: %v\n", err)
+			return 2
+		}
+		review, err := backupreview.InspectProfile(data)
+		if err != nil {
+			fmt.Fprintf(stderr, "inspect validation profile: %v\n", err)
+			return 2
+		}
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(review); err != nil {
+			fmt.Fprintf(stderr, "write profile inspection: %v\n", err)
+			return 2
+		}
+		return 0
 	}
 	backupMode := false
 	flags.Visit(func(option *flag.Flag) {

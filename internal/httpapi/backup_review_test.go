@@ -12,6 +12,37 @@ import (
 	"github.com/jagarkarlo/nostekon/internal/backupreview"
 )
 
+func TestValidationProfileRoute(t *testing.T) {
+	profile, err := os.ReadFile("../../examples/validation-profiles/orders.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]string{"profile": string(profile)})
+	expected, err := backupreview.InspectProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedJSON, _ := json.Marshal(expected)
+	for _, test := range []struct {
+		body   string
+		status int
+	}{
+		{string(body), 200},
+		{`{}`, 400}, {`{"profile":null}`, 400}, {`{"Profile":"{}"}`, 400},
+		{`{"profile":"{}","profile":"{}"}`, 400},
+		{`{"profile":"{}"} {}`, 400}, {`{"profile":"{}"}`, 422},
+		{`{"profile":"` + strings.Repeat("x", 6*backupreview.MaxPlanBytes+1024) + `"}`, 413},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/backups/profile", strings.NewReader(test.body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		NewHandler().ServeHTTP(response, request)
+		if response.Code != test.status || test.status == 200 && !bytes.Equal(bytes.TrimSpace(response.Body.Bytes()), expectedJSON) {
+			t.Fatalf("profile route: %d %s", response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestBackupReviewAndBundleRoutes(t *testing.T) {
 	plan, err := os.ReadFile("../../studio/e2e/postgresql-semantic-rehearsal.plan.json")
 	if err != nil {

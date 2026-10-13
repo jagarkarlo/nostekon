@@ -7,13 +7,14 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/jagarkarlo/nostekon/internal/backupreview"
 )
 
 func registerBackupRoutes(mux *http.ServeMux) {
-	for _, path := range []string{"/api/v1/backups/review", "/api/v1/backups/bundle", "/api/v1/backups/import"} {
+	for _, path := range []string{"/api/v1/backups/review", "/api/v1/backups/bundle", "/api/v1/backups/import", "/api/v1/backups/profile"} {
 		mux.HandleFunc("POST "+path, backupReviewHandler)
 	}
 }
@@ -33,7 +34,11 @@ func backupReviewHandler(writer http.ResponseWriter, request *http.Request) {
 		problem(http.StatusUnsupportedMediaType, "Content-Type must be application/json")
 		return
 	}
-	const limit = 2*backupreview.MaxBundleBytes + 1024
+	limit := int64(2*backupreview.MaxBundleBytes + 1024)
+	profileMode := request.URL.Path == "/api/v1/backups/profile"
+	if profileMode {
+		limit = 6*backupreview.MaxPlanBytes + 1024
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, limit))
 	if err != nil {
 		var oversized *http.MaxBytesError
@@ -48,9 +53,28 @@ func backupReviewHandler(writer http.ResponseWriter, request *http.Request) {
 		problem(http.StatusBadRequest, "backup request must be UTF-8 JSON")
 		return
 	}
-	fields, err := backupRequestFields(body, request.URL.Path == "/api/v1/backups/import")
+	var fields map[string]json.RawMessage
+	if profileMode {
+		fields, err = backupStringFields(body, "profile")
+	} else {
+		fields, err = backupRequestFields(body, request.URL.Path == "/api/v1/backups/import")
+	}
 	if err != nil {
 		problem(http.StatusBadRequest, err.Error())
+		return
+	}
+	if profileMode {
+		var original string
+		if err := json.Unmarshal(fields["profile"], &original); err != nil {
+			problem(http.StatusBadRequest, "profile must be a JSON string")
+			return
+		}
+		review, err := backupreview.InspectProfile([]byte(original))
+		if err != nil {
+			problem(http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(writer, http.StatusOK, review)
 		return
 	}
 	if request.URL.Path == "/api/v1/backups/import" {
@@ -96,6 +120,13 @@ func backupReviewHandler(writer http.ResponseWriter, request *http.Request) {
 }
 
 func backupRequestFields(body []byte, importing bool) (map[string]json.RawMessage, error) {
+	if importing {
+		return backupStringFields(body, "bundle")
+	}
+	return backupStringFields(body, "plan", "evidence")
+}
+
+func backupStringFields(body []byte, names ...string) (map[string]json.RawMessage, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
@@ -109,7 +140,7 @@ func backupRequestFields(body []byte, importing bool) (map[string]json.RawMessag
 		}
 		key, ok := token.(string)
 		_, duplicate := fields[key]
-		if !ok || duplicate || importing && key != "bundle" || !importing && key != "plan" && key != "evidence" {
+		if !ok || duplicate || !slices.Contains(names, key) {
 			return nil, errors.New("unknown or duplicate backup request field")
 		}
 		var value json.RawMessage
@@ -127,11 +158,7 @@ func backupRequestFields(body []byte, importing bool) (map[string]json.RawMessag
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("backup request requires one JSON document")
 	}
-	expected := 2
-	if importing {
-		expected = 1
-	}
-	if len(fields) != expected {
+	if len(fields) != len(names) {
 		return nil, errors.New("missing backup request fields")
 	}
 	return fields, nil

@@ -18,6 +18,28 @@ import (
 	"github.com/jagarkarlo/nostekon/internal/attest"
 )
 
+func TestValidationProfileMode(t *testing.T) {
+	var output, problems bytes.Buffer
+	if code := Run([]string{"--validation-profile", "../../examples/validation-profiles/inventory.json"}, &output, &problems); code != 0 {
+		t.Fatalf("profile inspection: %d %s", code, problems.String())
+	}
+	var review map[string]any
+	if err := json.Unmarshal(output.Bytes(), &review); err != nil || review["kind"] != "PostgreSQLProfileReview" || review["valid"] != true || review["passed"] != nil {
+		t.Fatalf("not a profile-only inspection: %s %v", output.String(), err)
+	}
+	for _, args := range [][]string{
+		{"--validation-profile", "missing.json"},
+		{"--validation-profile", "--suite", "profile.json"},
+		{"--validation-profile", "--backup-plan", "plan.json", "profile.json"},
+		{"--validation-profile", "--pushgateway-job", "nostekon", "profile.json"},
+	} {
+		output.Reset()
+		if code := Run(args, &output, &problems); code != 2 || output.Len() != 0 {
+			t.Fatalf("invalid profile mode admitted: %v %d %s", args, code, output.String())
+		}
+	}
+}
+
 func TestBackupPlanModeRejectsConflictingOptions(t *testing.T) {
 	for _, options := range [][]string{
 		{"--suite"}, {"--attestation", "sidecar.json", "--trusted-key", "key.pem"},
