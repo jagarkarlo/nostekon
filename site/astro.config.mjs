@@ -1,6 +1,9 @@
 import { defineConfig } from 'astro/config';
 
 export default defineConfig({
+  server: {
+    headers: { 'Content-Encoding': 'identity' },
+  },
   vite: {
     plugins: [{
       name: 'nostekon-static-apps',

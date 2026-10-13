@@ -5,11 +5,19 @@ Studio in your browser; no hosted account or public server is required. A
 dedicated desktop window is not implemented. The portable evidence app needs
 neither Docker, Python, Node nor Go at runtime.
 
-Verified on Linux on 2026-10-09: executable-relative Studio discovery from a
-different working directory, loopback defaults, version/help, HTTP capabilities
-and graceful interrupt shutdown. Six OS/architecture packages can be built.
+Verified on Linux on 2026-10-13 with `preview-c6c4708`: the extracted launcher
+finds Studio from a different working directory, reports the packaged source
+revision and keeps lab execution disabled. Ten desktop/mobile workflows passed
+against that actual package, including semantic profile authoring, exact exports,
+saved restore plans and original-only backups. All six archives passed checksum
+and launcher/tool inventory checks. Six OS/architecture packages can be built.
 Windows and macOS are cross-build targets, not locally verified executions.
 There is no renamed Nostekon release yet; historical `v0.1.0` predates it.
+
+The local download preview can offer unsigned builds with an explicit version,
+source revision and SHA-256. These are not an official release. Check the version
+you downloaded with `./nostekon-api --version` (or `nostekon-api.exe --version`)
+and compare it with the download page before use.
 
 ## Obtain a matching build
 
@@ -98,6 +106,21 @@ preflight, restore and guarded cleanup require the separate Python installation,
 approved inputs and dedicated local Docker host described in that guide. Installing
 the evidence app does not authorize production access or enable backup execution.
 
+## Author validation profiles offline
+
+Open **Profiles** in Studio to edit the Orders or Inventory starter, or import
+an exact original profile. The same packaged Go engine admits its structure and
+exports the JSON consumed by the Python runner. You can inspect a profile without
+starting the app:
+
+```bash
+./nostekon-report --validation-profile /protected/orders-profile.json
+```
+
+Use `nostekon-report.exe` on Windows. Exit `0` means the profile structure was
+admitted; `2` means invalid input or an input/output error. This does not check
+database contents, approve business rules, authorize a restore or prove recovery.
+
 ## Configure and identify
 
 ```bash
@@ -158,9 +181,16 @@ backup is not Import bundle or Import signed archive. Protect sensitive backups.
 | Address already in use | Stop the process you own or choose an unused loopback port; do not kill an unknown service. |
 | Studio missing | Keep extracted `studio/` beside the binary, or select its root with `--studio-dir`. |
 | Permission denied or OS blocks launch | Check the source and organizational policy; do not bypass security controls. |
+| Checksum mismatch | Do not execute the extracted binaries. Download again from the approved source and recheck. |
 | Empty library after moving | Reopen the old browser origin and export before clearing site data. |
 | Restore error | Keep originals, address the reported limit/evaluation/quota error and retry; no pruning occurs. |
 | Signature cannot verify | Authenticate/import the correct public key, explicitly grant trust and recheck exact originals. |
+
+If a `.tar.gz` download repeatedly fails its checksum while the server's archive
+matches, check its HTTP headers. The archive is already compressed; labeling it
+as transport-encoded `Content-Encoding: gzip` makes clients decompress it and
+changes its bytes. The local Astro preview preserves the originals. Independent
+hosting must also preserve the advertised archive size and SHA-256.
 
 To uninstall, stop the app and remove the extracted directory. Browser data is
 separate; export and verify originals before deliberately clearing site storage.

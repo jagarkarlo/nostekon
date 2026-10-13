@@ -207,6 +207,7 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto(process.env.NOSTEKON_APP_URL ? "/#/report" : "/demo/#/report");
     await page.getByTestId("evidence-input").setInputFiles({ name: "original.run.json", mimeType: "application/json", buffer: evidence });
+    await expect(page.getByRole("heading", { name: "Failed at V4: orders-id-required", exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Plan review", exact: true }).click();
     await page.getByTestId("backup-plan-input").setInputFiles({ name: "original.plan.json", mimeType: "application/json", buffer: plan });
     const gate = page.getByRole("status", { name: "Backup plan gate" });
@@ -745,6 +746,13 @@ for (const width of [390, 1440]) {
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
       const response = await page.request.head((await link.getAttribute("href"))!);
       expect(response.ok()).toBe(true);
+      expect(response.headers()["content-encoding"] ?? "identity").toBe("identity");
+      const download = page.waitForEvent("download");
+      await link.click();
+      const downloaded = await download;
+      expect(await downloaded.failure()).toBeNull();
+      const original = await readFile((await downloaded.path())!);
+      expect(createHash("sha256").update(original).digest("hex")).toBe(await link.getAttribute("data-sha256"));
     }
     const reportImage = page.getByRole("img", { name: /^Nostekon Studio evaluating/ });
     await reportImage.scrollIntoViewIfNeeded();
