@@ -5,7 +5,6 @@ import inventory from "../../examples/validation-profiles/inventory.json?raw";
 import { MAX_PLAN_BYTES, readOriginalJSON } from "./backupReview";
 import { editableRules, inspectProfile, profileSource } from "./validationProfile";
 import type { ProfileReview, ProfileRule } from "./validationProfile";
-import "./profiles.css";
 
 const draftKey = "nostekon-profile-draft-v1";
 const maxDraftBytes = 64 * 1024;

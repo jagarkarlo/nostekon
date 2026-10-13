@@ -463,6 +463,23 @@ Reusable [orders](examples/validation-profiles/orders.json) and
 mandatory references and parent-key checks. Synthetic real-Docker regressions
 prove equal row counts cannot hide the covered semantic corruption. Adapt these
 examples with the backup owner; they are not approved business contracts.
+
+Studio's **Profiles** workspace now authors these contracts directly: choose a
+starter or empty draft, edit/reorder up to 20 rules, inspect required tables and
+coverage warnings, and import/export exact originals. A local draft survives
+reload, but validation is recomputed by the shared native/WASM Go engine.
+Downloads require fresh valid structure, not a cached or measured-data verdict.
+Inspect the same file offline, without Docker or database access:
+
+```bash
+go run ./cmd/nostekon-report --validation-profile examples/validation-profiles/orders.json
+```
+
+Exit `0` means structurally valid, including any warnings; `2` means invalid input,
+mode conflict or output failure. Data, snapshot counts and owner approval remain
+unverified. See the [profile authoring guide](site/src/content/docs/guides/postgresql-backup-rehearsal.md#author-and-inspect-profiles)
+for exact-file handling, draft limits and the shared HTTP contract.
+
 Each attempt keeps a private locked `OUTPUT.json.recovery` checkpoint. After a
 hard stop or failed cleanup, inspect it without mutation:
 

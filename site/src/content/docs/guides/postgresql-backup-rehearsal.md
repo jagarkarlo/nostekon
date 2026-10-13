@@ -233,6 +233,66 @@ includes complete reported V4 details, and original JSON export remains exact.
 Passing means only the selected rules and preceding levels passed. It does not
 prove full application correctness, authenticated capture, incident RTO or RPO.
 
+## Author and inspect profiles
+
+Studio's **Profiles** view creates and edits the same validation-profile files
+accepted by `backup plan`. It is available in the local app at `/#/profiles` and
+the browser demo at `/demo/#/profiles`; neither path starts a restore or connects
+to a database. Select Orders, Inventory or an empty template, then edit names,
+types, tables, columns and foreign-key parent fields. Rules can be added,
+removed and reordered, up to the 20-rule limit. An empty profile is a draft,
+not an admitted contract.
+
+Edits are validated through the shared Go engine. **Valid structure** means only
+strict profile admission passed. The view lists required tables, null-coverage
+and parent-key coverage warnings, and explicitly leaves data, snapshot counts
+and owner approval unverified. A warning is not a measured data violation or a
+business-rule approval; no warning is not proof of complete domain coverage.
+
+Import requires a nonempty, strict UTF-8 JSON file within 16 KiB. Invalid imports
+retain the current draft and display an error. Downloads require a fresh
+successful inspection of the current source; an edit immediately invalidates
+the previous result. Unedited imports export their exact original bytes.
+An explicit form edit produces a new versioned JSON document and a new original
+SHA-256; the hash is an identity check, not a signature or approval.
+
+The browser stores one local draft, including invalid intermediate JSON, up to
+64 KiB. Reload revalidates it through Go, without trusting a cached result.
+This draft is browser-local, not a shared or approved contract. If storage is
+unavailable or full, Studio warns that the draft was not saved. Download a
+validated copy before leaving; clearing browser storage removes the draft.
+
+From a source checkout with Go installed, inspect a profile offline:
+
+```bash
+go run ./cmd/nostekon-report --validation-profile examples/validation-profiles/orders.json
+```
+
+The installed `nostekon-report` executable accepts the same flag. Output is
+`PostgreSQLProfileReview` JSON with `valid`, exact original `profileSHA256`,
+admitted rules, sorted required tables, warnings and limitations. There is no
+`passed` data verdict. Exit `0` means admitted structure, including any coverage
+warnings; exit `2` means invalid/unreadable input, conflicting flags or output
+failure. This mode cannot be combined with evidence, suite, signature, bundle
+or Pushgateway options, even when they explicitly supply a default value.
+
+The local/native and browser/WASM APIs share
+`POST /api/v1/backups/profile`, with `Content-Type: application/json` and an exact
+one-field envelope whose `profile` value is the original JSON **string**, not
+a parsed object. HTTP `200` returns the same inspection; `400` rejects an
+ambiguous envelope, `413` an oversized envelope, `415` the wrong media type,
+`422` an invalid profile and `503` exhausted review capacity. The profile itself
+remains bounded to 16 KiB; the envelope allows up to `6 * 16384 + 1024` bytes for
+JSON escaping. Resolve the admission error, or retry capacity/network failures;
+never treat a failed request as an approved profile.
+
+Verified locally on 2026-10-13: desktop/mobile authoring, native/WASM inspection,
+exact imported exports, authored-export CLI parity, invalid-draft recovery,
+strict duplicate rejection and the rule cap. Structural inspection does not
+replace owner review, snapshot-specific counts, isolated-host preflight, actual
+restore or the independent evidence gate below. The production-origin pilot
+remains deferred.
+
 ## Reusable profile starters
 
 Source checkouts include two profiles tested with synthetic PostgreSQL 16.8
