@@ -8,13 +8,14 @@ import { Studio } from "./Studio";
 import { RunLibrary } from "./RunLibrary";
 import { SuiteView } from "./SuiteView";
 import { LabView } from "./LabView";
+import { ProfileWorkspace } from "./ProfileWorkspace";
 
-type View = "runs" | "design" | "report" | "suite" | "lab";
+type View = "runs" | "design" | "report" | "suite" | "lab" | "profiles";
 type APIState = "checking" | "online" | "offline";
 
 const viewFromHash = (): View => {
   const hash = window.location.hash.toLowerCase().replace("%2f", "/");
-  return hash === "#/report" ? "report" : hash === "#/design" ? "design" : hash === "#/suite" ? "suite" : hash === "#/lab" ? "lab" : "runs";
+  return hash === "#/profiles" ? "profiles" : hash === "#/report" ? "report" : hash === "#/design" ? "design" : hash === "#/suite" ? "suite" : hash === "#/lab" ? "lab" : "runs";
 };
 const browserDemo = window.location.pathname.startsWith("/demo/");
 
@@ -72,6 +73,7 @@ export function App() {
           <a href="#/runs" aria-current={view === "runs" ? "page" : undefined}><LayoutList size={15} /> Runs</a>
           <a href="#/lab" aria-current={view === "lab" ? "page" : undefined}><Play size={15} /> Lab</a>
           <a href="#/suite" aria-current={view === "suite" ? "page" : undefined}><FlaskConical size={15} /> Suite</a>
+          <a href="#/profiles" aria-current={view === "profiles" ? "page" : undefined}><FileCheck2 size={15} /> Profiles</a>
           <a href="#/design" aria-current={view === "design" ? "page" : undefined}>
             <PencilRuler size={15} /> Design
           </a>
@@ -110,6 +112,9 @@ export function App() {
       </div>
       <div className="view" hidden={view !== "design"}>
         <Studio onReachability={onReachability} />
+      </div>
+      <div className="view" hidden={view !== "profiles"}>
+        <ProfileWorkspace active={view === "profiles"} />
       </div>
       <div className="view" hidden={view !== "report"}>
         <ReportView onReachability={onReachability} selection={selection} />

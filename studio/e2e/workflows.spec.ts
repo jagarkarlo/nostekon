@@ -24,6 +24,80 @@ function evidenceArchive(files: Awaited<ReturnType<typeof suiteBundle>>) {
 }
 
 for (const width of [390, 1440]) {
+  test(`semantic profile authoring and exact originals at ${width}px`, async ({ page }) => {
+    const inventory = await readFile(new URL("../../examples/validation-profiles/inventory.json", import.meta.url));
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(process.env.NOSTEKON_APP_URL ? "/#/profiles" : "/demo/#/profiles");
+    await expect(page.getByRole("heading", { name: "Validation profiles", exact: true })).toBeVisible();
+    page.once("dialog", dialog => dialog.accept());
+    await page.getByLabel("Profile template").selectOption("inventory");
+    const status = page.getByRole("status", { name: "Profile validation" });
+    await expect(status).toContainText("Valid structure");
+    await expect(status).toContainText("Data not measured");
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download profile", exact: true }).click();
+    expect(await readFile((await (await download).path())!)).toEqual(inventory);
+    await page.getByLabel("Rule 1 name", { exact: true }).fill("products-id-unique");
+    await expect(page.getByRole("alert")).toContainText("duplicate invariant");
+    await expect(page.getByRole("button", { name: "Download profile", exact: true })).toBeDisabled();
+    await page.getByLabel("Rule 1 name", { exact: true }).fill("products-id-required");
+    await expect(status).toContainText("Valid structure");
+    await page.getByRole("button", { name: "Remove rule 1", exact: true }).click();
+    await expect(page.getByText(/lacks required and unique parent-key coverage/)).toBeVisible();
+    await page.getByRole("button", { name: "Add rule", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Download profile", exact: true })).toBeDisabled();
+    await page.getByLabel("Rule 10 name", { exact: true }).fill("products-id-required");
+    await page.getByLabel("Rule 10 table", { exact: true }).fill("public.products");
+    await page.getByLabel("Rule 10 column", { exact: true }).fill("id");
+    await expect(status).toContainText("Valid structure");
+    const authoredDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download profile", exact: true }).click();
+    const authored = await readFile((await (await authoredDownload).path())!);
+    const authoredPath = test.info().outputPath("authored-profile.json");
+    await writeFile(authoredPath, authored);
+    const cli = JSON.parse(execFileSync("go", ["run", "./cmd/nostekon-report", "--validation-profile", authoredPath], { cwd: new URL("../../", import.meta.url), encoding: "utf8" }));
+    expect(cli.valid).toBe(true);
+    expect(cli.profileSHA256).toBe(createHash("sha256").update(authored).digest("hex"));
+    expect(cli.invariants).toEqual(JSON.parse(authored.toString()).invariants);
+    expect(cli.tables).toEqual(["public.products", "public.stock", "public.warehouses"]);
+    expect(cli).not.toHaveProperty("passed");
+    await page.reload();
+    await expect(page.getByLabel("Rule 10 name", { exact: true })).toHaveValue("products-id-required");
+    await expect(status).toContainText("Valid structure");
+    await page.getByTestId("profile-input").setInputFiles({ name: "invalid.json", mimeType: "application/json", buffer: Buffer.from("null") });
+    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(page.getByLabel("Rule 10 name", { exact: true })).toHaveValue("products-id-required");
+    await page.getByTestId("profile-input").setInputFiles({ name: "inventory.json", mimeType: "application/json", buffer: inventory });
+    await expect(status).toContainText("Valid structure");
+    const exported = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download profile", exact: true }).click();
+    expect(await readFile((await (await exported).path())!)).toEqual(inventory);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath(`profiles-${width}.png`), fullPage: true });
+    await page.getByRole("button", { name: /Switch to .* mode/ }).click();
+    await page.screenshot({ path: test.info().outputPath(`profiles-alternate-theme-${width}.png`), fullPage: true });
+  });
+
+  test(`semantic profile rejects ambiguous JSON and caps authoring at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(process.env.NOSTEKON_APP_URL ? "/#/profiles" : "/demo/#/profiles");
+    const source = JSON.stringify({ apiVersion: "nostekon/validation-profile/v1alpha1", kind: "PostgreSQLValidationProfile", invariants: Array.from({ length: 20 }, (_, index) => ({ name: `required-${index + 1}`, type: "not_null", table: "public.orders", column: "id" })) });
+    await page.getByTestId("profile-input").setInputFiles({ name: "twenty.json", mimeType: "application/json", buffer: Buffer.from(source) });
+    await expect(page.getByRole("status", { name: "Profile validation" })).toContainText("Valid structure");
+    await expect(page.getByRole("button", { name: "Add rule", exact: true })).toBeDisabled();
+    await page.getByRole("button", { name: "Move rule 20 up", exact: true }).click();
+    await expect(page.getByLabel("Rule 19 name", { exact: true })).toHaveValue("required-20");
+    await page.getByText("Profile JSON", { exact: true }).click();
+    const duplicate = '{"apiVersion":"nostekon/validation-profile/v1alpha1","kind":"PostgreSQLValidationProfile","invariants":[],"invariants":[]}';
+    await page.getByLabel("Profile JSON", { exact: true }).fill(duplicate);
+    await expect(page.getByRole("alert")).toContainText(/duplicate/);
+    await expect(page.getByRole("button", { name: "Download profile", exact: true })).toBeDisabled();
+    await page.reload();
+    await expect(page.getByRole("alert")).toContainText(/duplicate/);
+    await page.getByText("Profile JSON", { exact: true }).click();
+    await expect(page.getByLabel("Profile JSON", { exact: true })).toHaveValue(duplicate);
+  });
+
   test(`saved backup plans survive reload and original-only history backup at ${width}px`, async ({ page }) => {
     const [plan, evidence] = await Promise.all([
       readFile(new URL("./postgresql-semantic-rehearsal.plan.json", import.meta.url)),
