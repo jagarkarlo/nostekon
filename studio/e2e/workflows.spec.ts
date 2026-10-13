@@ -733,6 +733,8 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/download/");
     await expect(page.getByRole("heading", { name: "Download Nostekon" })).toBeVisible();
+    await expect(page.locator(".flow-track")).toContainText("./start-nostekon.sh");
+    await expect(page.locator(".flow-track")).toContainText("Start-Nostekon.cmd");
     await expect(page.getByRole("main")).toContainText("A renamed tag release has not been published");
     await expect(page.getByRole("link", { name: "Installation guide", exact: true })).toHaveAttribute("href", "/docs/guides/portable-app/");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
