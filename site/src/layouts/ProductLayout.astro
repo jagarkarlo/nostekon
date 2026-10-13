@@ -137,3 +137,23 @@ const footerGroups = [
     </footer>
   </body>
 </html>
+<script>
+  let observer: IntersectionObserver | undefined;
+  function initializeReveals() {
+    observer?.disconnect();
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    observer = new IntersectionObserver(entries => {
+      for (const entry of entries) if (entry.isIntersecting) {
+        (entry.target as HTMLElement).dataset.visible = "true";
+        observer?.unobserve(entry.target);
+      }
+    }, { threshold: 0.08 });
+    for (const element of document.querySelectorAll<HTMLElement>(".section > .wrap")) {
+      element.dataset.reveal = "true";
+      element.dataset.visible = String(element.getBoundingClientRect().top < innerHeight);
+      if (element.dataset.visible === "false") observer.observe(element);
+    }
+  }
+  initializeReveals();
+  document.addEventListener("astro:page-load", initializeReveals);
+</script>

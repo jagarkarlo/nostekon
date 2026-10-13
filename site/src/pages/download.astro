@@ -1,7 +1,7 @@
 ---
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { ArrowDownToLine, ArrowUpRight } from "@lucide/astro";
+import { ArrowDownToLine, ArrowRight, ArrowUpRight, Check, Copy, FolderArchive, Monitor, ShieldAlert, Terminal } from "@lucide/astro";
 import ProductLayout from "../layouts/ProductLayout.astro";
 import Shot from "../components/Shot.astro";
 
@@ -20,21 +20,43 @@ if (existsSync(manifest)) {
   build = value;
 }
 const platformName = (name: string) => name.replace("nostekon-app_", "").replace("linux_", "Linux ").replace("darwin_", "macOS ").replace("windows_", "Windows ").replace("amd64", "x86-64").replace("arm64", "ARM64").replace(".tar.gz", " (.tar.gz)").replace(".zip", " (.zip)");
+const artifacts = build?.artifacts.map(file => {
+  const [, platform, architecture] = file.name.match(/_(linux|darwin|windows)_(amd64|arm64)/)!;
+  return { ...file, platform, architecture, label: platformName(file.name).replace(/ \(.+\)$/, "") };
+}) ?? [];
+const initial = artifacts.find(file => file.platform === "linux" && file.architecture === "amd64") ?? artifacts[0];
 ---
 <ProductLayout title="Download" description="Install Nostekon locally: portable Go app bundles, verified checksums, CI builds and an offline-capable browser interface." current="download">
   <section class="page-title"><div class="wrap">
+    <p class="eyebrow">Your evidence. Your machine.</p>
     <h1>Download Nostekon</h1>
     <p class="lead">A local Go application with Studio in your browser. No hosted account, Docker or language runtime is needed to review evidence.</p>
-    <div class="actions"><a class="btn primary" href="/docs/guides/portable-app/">Installation guide <ArrowUpRight size={16} /></a><a class="btn secondary" href="/demo/index.html#/runs">Open browser demo</a></div>
+    <div class="hero-actions"><a class="btn" href="/docs/guides/portable-app/">Installation guide <ArrowUpRight size={16} /></a><a class="btn" href="/demo/index.html#/runs">Open browser demo <ArrowRight size={16} /></a></div>
   </div></section>
   {build && <section class="section local-downloads"><div class="wrap">
-    <div class="section-head"><h2>Local development builds</h2><p class="section-lead">Version {build.version}, source {build.revision.slice(0, 12)}. These unsigned packages were built for this preview, not published as an official release.</p></div>
-    <div class="download-build">{build.artifacts.map(file => <div class="download-row">
-      <a class="btn secondary" href={`/downloads/${file.name}`} download><ArrowDownToLine size={17} /> {platformName(file.name)}</a>
-      <div><p>{(file.size / 1024 / 1024).toFixed(1)} MiB</p><code class="download-hash">SHA-256: {file.sha256}</code></div>
-    </div>)}</div>
-    <p class="prose"><a class="link" href="/downloads/SHA256SUMS" download>Download checksum file</a>. Verify it before running; checksums do not establish publisher identity.</p>
+    <div class="download-picker" data-download-picker>
+      <div class="download-picker-head"><h2>Local development builds</h2><span class="preview-status"><ShieldAlert size={15} />Unsigned preview</span></div>
+      <p class="download-version">{build.version} <span>source {build.revision.slice(0, 12)}</span></p>
+      <div class="platform-picker" role="group" aria-label="Operating system">
+        {([{ id: "linux", name: "Linux" }, { id: "darwin", name: "macOS" }, { id: "windows", name: "Windows" }]).map(platform => <button type="button" data-platform={platform.id} aria-pressed={initial.platform === platform.id} disabled={!artifacts.some(file => file.platform === platform.id)}><Monitor size={18} />{platform.name}</button>)}
+      </div>
+      <div class="download-selection"><label>Architecture<select aria-label="Architecture" data-architecture><option value="amd64" selected={initial.architecture === "amd64"}>x86-64 (Intel / AMD)</option><option value="arm64" selected={initial.architecture === "arm64"}>ARM64 (Apple Silicon / ARM)</option></select></label>
+        <a class="btn btn-primary" data-selected-download href={`/downloads/${initial.name}`} download><ArrowDownToLine size={18} /><span>Download {initial.label}</span></a>
+      </div>
+      <p class="download-meta" data-download-meta>{(initial.size / 1024 / 1024).toFixed(1)} MiB · {initial.name.endsWith("zip") ? ".zip" : ".tar.gz"} · Go app + Studio</p>
+      <p class="download-disclaimer">These unsigned packages were built for this preview, not published as an official release. Review the version and source before running.</p>
+      <details class="download-checksum"><summary>Checksum and source</summary><div class="checksum-line"><code data-selected-hash>{initial.sha256}</code><button type="button" class="theme-toggle" data-copy-checksum aria-label="Copy SHA-256 checksum" title="Copy SHA-256 checksum"><Copy size={16} /></button></div><p class="checksum-note">Checksums detect changed bytes; they do not establish publisher identity.</p><a class="link" href="/downloads/SHA256SUMS" download>Download checksum file</a><p role="status" data-copy-status></p></details>
+      <details class="all-builds"><summary>All platform builds</summary><div class="download-build">{artifacts.map(file => <div class="download-row"><a href={`/downloads/${file.name}`} data-archive data-platform={file.platform} data-architecture={file.architecture} data-label={file.label} data-sha256={file.sha256} data-size={file.size} download><ArrowDownToLine size={16} />{file.label}</a><span>{(file.size / 1024 / 1024).toFixed(1)} MiB</span></div>)}</div></details>
+    </div>
   </div></section>}
+  <section class="section"><div class="wrap">
+    <div class="section-head"><p class="eyebrow">From archive to workbench</p><h2>Three steps. No account.</h2></div>
+    <ol class="flow-track">
+      <li><FolderArchive size={24} /><span class="flow-number">01 / Extract</span><h3>Keep the bundle together</h3><p>Extract the archive into one folder. The Go application and its Studio files ship together.</p></li>
+      <li><Terminal size={24} /><span class="flow-number">02 / Launch</span><h3>Start on localhost</h3><p>Run <code>./start.sh</code> on Linux or macOS, or <code>start.cmd</code> on Windows. Lab execution stays off.</p></li>
+      <li><Check size={24} /><span class="flow-number">03 / Review</span><h3>Open your evidence</h3><p>Open the printed localhost address. Explore included captures or import your original evidence.</p></li>
+    </ol>
+  </div></section>
   <section class="section"><div class="wrap">
     <div class="section-head"><h2>Choose your installation</h2><p class="section-lead">Nostekon is pre-alpha. A renamed tag release has not been published; the historical v0.1.0 package is not the current app.</p></div>
     <dl class="facts">
@@ -46,12 +68,43 @@ const platformName = (name: string) => name.replace("nostekon-app_", "").replace
   </div></section>
   <section class="section"><div class="wrap">
     <div class="section-head"><h2>The same evidence workbench, locally</h2><p class="section-lead">Evidence evaluation works without Kubernetes. Only an explicit Linux host opt-in enables the fixed isolated lab suite; a desktop window and automatic updater are not implemented.</p></div>
-    <Shot name="report-lab" height={900} alt="Nostekon Studio evaluating recorded PostgreSQL recovery evidence, showing V4 verification, recovery time and acknowledged-write data loss." caption="Recorded evidence, evaluated locally. A report judges supplied evidence; it is not proof of an independent production restore." />
+    <Shot name="report-lab" height={739} alt="Nostekon Studio evaluating recorded PostgreSQL recovery evidence through V3, showing restored row counts and recovery phases." caption="Recorded evidence, evaluated locally. V3 row counts are not proof of acknowledged-write recovery, business correctness or an independent production restore." />
   </div></section>
 </ProductLayout>
-<style>
-  .download-row { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; padding: 20px 0; border-bottom: 1px solid var(--line); }
-  .download-row p { margin: 0 0 8px; }
-  .download-hash { display: block; overflow-wrap: anywhere; font-size: 13px; }
-  @media (max-width: 700px) { .download-row { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
-</style>
+<script>
+  function initializeDownloads() {
+    const picker = document.querySelector<HTMLElement>("[data-download-picker]");
+    if (!picker || picker.dataset.ready) return;
+    picker.dataset.ready = "true";
+    const platforms = Array.from(picker.querySelectorAll<HTMLButtonElement>("button[data-platform]"));
+    const architecture = picker.querySelector<HTMLSelectElement>("[data-architecture]")!;
+    const archives = Array.from(picker.querySelectorAll<HTMLAnchorElement>("[data-archive]"));
+    const download = picker.querySelector<HTMLAnchorElement>("[data-selected-download]")!;
+    const hash = picker.querySelector<HTMLElement>("[data-selected-hash]")!;
+    const status = picker.querySelector<HTMLElement>("[data-copy-status]")!;
+    let selectedPlatform = platforms.find(button => button.getAttribute("aria-pressed") === "true")!.dataset.platform;
+    const update = () => {
+      platforms.forEach(button => button.setAttribute("aria-pressed", String(button.dataset.platform === selectedPlatform)));
+      for (const option of architecture.options) option.disabled = !archives.some(file => file.dataset.platform === selectedPlatform && file.dataset.architecture === option.value);
+      if (architecture.selectedOptions[0].disabled) architecture.value = Array.from(architecture.options).find(option => !option.disabled)!.value;
+      const file = archives.find(file => file.dataset.platform === selectedPlatform && file.dataset.architecture === architecture.value)!;
+      download.href = file.href;
+      download.querySelector("span")!.textContent = `Download ${file.dataset.label}`;
+      hash.textContent = file.dataset.sha256!;
+      picker.querySelector("[data-download-meta]")!.textContent = `${(Number(file.dataset.size) / 1024 / 1024).toFixed(1)} MiB · ${file.pathname.endsWith("zip") ? ".zip" : ".tar.gz"} · Go app + Studio`;
+      status.textContent = "";
+    };
+    const detected = /Mac/.test(navigator.platform) ? "darwin" : /Win/.test(navigator.platform) ? "windows" : /Linux/.test(navigator.platform) ? "linux" : selectedPlatform;
+    if (platforms.some(button => button.dataset.platform === detected && !button.disabled)) selectedPlatform = detected;
+    platforms.forEach(button => button.addEventListener("click", () => { selectedPlatform = button.dataset.platform; update(); }));
+    architecture.addEventListener("change", update);
+    picker.querySelector("[data-copy-checksum]")!.addEventListener("click", async () => {
+      const copiedHash = hash.textContent!;
+      try { await navigator.clipboard.writeText(copiedHash); if (hash.textContent === copiedHash) status.textContent = "Checksum copied."; }
+      catch { if (hash.textContent === copiedHash) status.textContent = "Clipboard unavailable. Select the checksum to copy it."; }
+    });
+    update();
+  }
+  initializeDownloads();
+  document.addEventListener("astro:page-load", initializeDownloads);
+</script>

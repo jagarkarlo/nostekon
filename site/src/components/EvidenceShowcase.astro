@@ -1,0 +1,49 @@
+---
+import { ArrowUpRight, CheckCheck, FileSearch, ShieldAlert } from "@lucide/astro";
+import Shot from "./Shot.astro";
+
+const previews = [
+  { id: "suite", label: "Policy suite", icon: CheckCheck, image: "policy-suite", height: 900, alt: "Three recorded PostgreSQL lab cases, with zero loss, strict tail loss and budgeted loss independently evaluated.", caption: "Recorded lab evidence. Three policies, one independent gate. The intentional strict-policy failure stays visible; signatures remain unverified.", href: "/demo/index.html#/suite", action: "Explore the policy suite" },
+  { id: "restore", label: "Restore report", icon: FileSearch, image: "report-lab", height: 739, alt: "A recorded isolated PostgreSQL restore passing through V3, showing recovery phases and restored row counts.", caption: "Recorded lab evidence. V3 confirms the declared row count. Without a write ledger, this capture does not prove an RPO or business-level correctness.", href: "/demo/index.html#/runs", action: "Browse recovery evidence" },
+  { id: "failed", label: "Failed recovery", icon: ShieldAlert, image: "report-failed", height: 739, alt: "A synthetic failed recovery report with a row-count failure and missed recovery-time objective.", caption: "Synthetic example. A restore can finish while its data checks fail. Failed checks and the missed recovery-time objective remain in the report.", href: "/demo/index.html#/runs", action: "Browse recovery examples" },
+];
+---
+<div class="evidence-showcase" data-showcase>
+  <div class="showcase-tabs" role="tablist" aria-label="Recovery evidence previews">
+    {previews.map((preview, index) => <button type="button" id={`preview-tab-${preview.id}`} role="tab" aria-controls={`preview-panel-${preview.id}`} aria-selected={index === 0 ? "true" : "false"} tabindex={index === 0 ? 0 : -1}><preview.icon size={17} aria-hidden="true" />{preview.label}</button>)}
+  </div>
+  <div class="showcase-panels">
+    {previews.map((preview, index) => <div class="showcase-panel" id={`preview-panel-${preview.id}`} role="tabpanel" aria-labelledby={`preview-tab-${preview.id}`} tabindex="0" hidden={index !== 0}>
+      <Shot name={preview.image} height={preview.height} alt={preview.alt} caption={preview.caption} />
+      <a class="showcase-open" href={preview.href}>{preview.action}<ArrowUpRight size={16} aria-hidden="true" /></a>
+    </div>)}
+  </div>
+</div>
+<script>
+  function initializeShowcases() {
+    for (const showcase of document.querySelectorAll<HTMLElement>("[data-showcase]")) {
+      if (showcase.dataset.ready) continue;
+      showcase.dataset.ready = "true";
+      const tabs = Array.from(showcase.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+      const panels = Array.from(showcase.querySelectorAll<HTMLElement>('[role="tabpanel"]'));
+      const select = (index: number) => {
+        tabs.forEach((tab, position) => { tab.setAttribute("aria-selected", String(position === index)); tab.tabIndex = position === index ? 0 : -1; });
+        panels.forEach((panel, position) => { panel.hidden = position !== index; });
+      };
+      tabs.forEach((tab, index) => {
+        tab.addEventListener("click", () => select(index));
+        tab.addEventListener("keydown", event => {
+          let next = index;
+          if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+          else if (event.key === "ArrowLeft") next = (index + tabs.length - 1) % tabs.length;
+          else if (event.key === "Home") next = 0;
+          else if (event.key === "End") next = tabs.length - 1;
+          else return;
+          event.preventDefault(); select(next); tabs[next].focus();
+        });
+      });
+    }
+  }
+  initializeShowcases();
+  document.addEventListener("astro:page-load", initializeShowcases);
+</script>

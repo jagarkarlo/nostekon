@@ -24,6 +24,53 @@ function evidenceArchive(files: Awaited<ReturnType<typeof suiteBundle>>) {
 }
 
 for (const width of [390, 1440]) {
+  test(`interactive product and focused downloads at ${width}px`, async ({ page }) => {
+    test.skip(!!process.env.NOSTEKON_APP_URL, "Public pages belong to the static site.");
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/");
+    expect(await page.locator(".hero h1").evaluate(element => getComputedStyle(element).animationName)).toBe("product-arrive");
+    await expect(page.getByRole("tab", { name: "Policy suite", exact: true })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "Restore report", exact: true }).click();
+    await expect(page.getByRole("tabpanel")).toContainText("V3");
+    await page.getByRole("tab", { name: "Failed recovery", exact: true }).click();
+    await expect(page.getByRole("tabpanel")).toContainText("Synthetic");
+    await page.getByRole("tab", { name: "Failed recovery", exact: true }).press("Home");
+    await expect(page.getByRole("tab", { name: "Policy suite", exact: true })).toBeFocused();
+    await page.getByRole("navigation", { name: "Main navigation", exact: true }).getByRole("link", { name: "Download", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Download Nostekon", exact: true })).toBeVisible();
+    if (await page.locator("[data-download-picker]").count()) {
+    await expect(page.locator("[data-download-picker]")).toHaveAttribute("data-ready", "true");
+    for (const platform of ["Linux", "macOS", "Windows"]) {
+      const platformButton = page.getByRole("button", { name: platform, exact: true });
+      if (await platformButton.isDisabled()) continue;
+      await platformButton.click();
+      await expect(platformButton).toHaveAttribute("aria-pressed", "true");
+      for (const architecture of ["amd64", "arm64"]) {
+        if (await page.getByLabel("Architecture", { exact: true }).locator(`option[value="${architecture}"]`).isDisabled()) continue;
+        await page.getByLabel("Architecture", { exact: true }).selectOption(architecture);
+        const download = page.locator("[data-selected-download]");
+        const target = platform === "macOS" ? "darwin" : platform.toLowerCase();
+        await expect(download).toHaveAttribute("href", new RegExp(`${target}_${architecture}\\.(tar\\.gz|zip)$`));
+        await expect(download).toContainText(platform);
+      }
+    }
+    await expect(page.locator(".download-checksum code")).toHaveText(/^[a-f0-9]{64}$/);
+    } else {
+      await expect(page.getByRole("link", { name: "View CI builds", exact: true })).toBeVisible();
+      await expect(page.locator("[data-selected-download]")).toHaveCount(0);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.getByRole("navigation", { name: "Main navigation", exact: true }).getByRole("link", { name: "Product", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Nostekon", exact: true })).toBeVisible();
+    expect(await page.locator(".page-title h1").evaluate(element => getComputedStyle(element).animationName)).toBe("none");
+    await page.getByRole("tab", { name: "Restore report", exact: true }).click();
+    await expect(page.getByRole("tabpanel")).toBeVisible();
+    await page.getByRole("navigation", { name: "Main navigation", exact: true }).getByRole("link", { name: "Overview", exact: true }).click();
+    await page.getByRole("tab", { name: "Failed recovery", exact: true }).click();
+    await expect(page.getByRole("tabpanel")).toContainText("Synthetic");
+  });
+
   test(`product workflows and real preview at ${width}px`, async ({ page }) => {
     test.skip(!!process.env.NOSTEKON_APP_URL, "Product page belongs to the static site.");
     await page.setViewportSize({ width, height: 1000 });
@@ -689,6 +736,7 @@ for (const width of [390, 1440]) {
     await expect(page.getByRole("main")).toContainText("A renamed tag release has not been published");
     await expect(page.getByRole("link", { name: "Installation guide", exact: true })).toHaveAttribute("href", "/docs/guides/portable-app/");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    if (await page.locator(".all-builds").count()) await page.getByText("All platform builds", { exact: true }).click();
     for (const link of await page.locator(".download-build a").all()) {
       const bounds = await link.boundingBox();
       expect(bounds!.x).toBeGreaterThanOrEqual(0);
@@ -1322,11 +1370,11 @@ test("homepage explains the product and its commands", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "Nostekon", exact: true })).toBeVisible();
   await expect(page.locator(".hero").getByRole("link", { name: "Open the policy suite" })).toHaveAttribute("href", "/demo/index.html#/suite");
-  await expect(page.locator(".hero").getByRole("link", { name: "Run the local app" })).toHaveAttribute("href", "#quickstart");
+  await expect(page.locator(".hero").getByRole("link", { name: "Get the local app" })).toHaveAttribute("href", "/download/");
   await expect(page.getByText("The demo evaluates evidence; it does not connect to Kubernetes.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "What a report tells you" })).toBeVisible();
-  await expect(page.locator(".step")).toHaveCount(5);
-  await expect(page.locator(".step-state", { hasText: "Lab only" })).toHaveCount(1);
+  await expect(page.locator(".step")).toHaveCount(3);
+  await expect(page.locator(".step-state", { hasText: "Local CLI" })).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Not built yet" })).toBeVisible();
   await expect.poll(() => page.locator(".shot img:visible").evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth === 1280 && image.naturalHeight === 900)).toBe(true);
 
@@ -1355,7 +1403,7 @@ test("site stays readable, self-hosted and free of decoration", async ({ page })
     const url = new URL(request.url());
     if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") external.push(url.hostname);
   });
-  for (const path of ["/", "/product/", "/evidence/", "/roadmap/", "/legal/privacy/", "/legal/terms/", "/legal/trademark/", "/legal/license/"]) {
+  for (const path of ["/", "/product/", "/download/", "/evidence/", "/roadmap/", "/legal/privacy/", "/legal/terms/", "/legal/trademark/", "/legal/license/"]) {
     await page.goto(path);
     await expect(page.locator("h1")).toHaveCount(1);
     const smallText = await page.evaluate(() => {

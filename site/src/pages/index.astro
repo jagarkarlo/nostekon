@@ -1,6 +1,7 @@
 ---
 import ProductLayout from '../layouts/ProductLayout.astro';
-import Shot from '../components/Shot.astro';
+import EvidenceShowcase from '../components/EvidenceShowcase.astro';
+import { ArrowRight, ArrowDownToLine, Database, FileCheck2, Fingerprint } from '@lucide/astro';
 
 const description = 'Rehearse PostgreSQL restores, author semantic validation profiles and independently review original recovery evidence in Nostekon Studio or CI.';
 
@@ -13,28 +14,32 @@ const report = `go build -o /tmp/nostekon-report ./cmd/nostekon-report
   > /tmp/nostekon-suite-review.json`;
 
 const steps = [
-  { title: "Describe the drill", text: "A YAML file names the failure to simulate, where to restore, how deep to verify and your recovery time and data loss goals.", state: "Available", later: false },
-  { title: "Run the restore", text: "The lab backs up seeded PostgreSQL, deletes its source namespace and restores into a second k3d cluster. A policy suite exercises zero loss, strict tail loss and budgeted loss.", state: "Lab only", later: true },
-  { title: "Record what happened", text: "Original case JSON, a suite summary and a host-side write ledger preserve the measured outcomes. Terminal host jobs can export a checksummed evidence bundle.", state: "Available", later: false },
-  { title: "Evaluate the evidence", text: "The Go engine evaluates each case independently and gates the whole suite. Studio compares the summary with those results and exports the same review as the CLI.", state: "Available", later: false },
-  { title: "Check who holds the key", text: "Sign original evidence with the CLI, authenticate the owner's public-key fingerprint, and verify the exact bytes in Studio or the browser. Local revocation stays separate from the recovery verdict.", state: "Available", later: false },
+  { title: "Choose your expectations", text: "Bind an approved backup to its snapshot counts and optional semantic profile. Or start with the fixed, disposable PostgreSQL lab.", state: "Plan + profile", later: false },
+  { title: "Restore in isolation", text: "The separate Python runner records checks and timings, including failures. The review app never receives a Docker socket or production credentials.", state: "Local CLI", later: true },
+  { title: "Review the original evidence", text: "Studio and CI independently evaluate the same inputs. Keep the originals, compare outcomes and verify signatures separately from the recovery verdict.", state: "Studio + CI", later: false },
 ];
 ---
 <ProductLayout title="Restore evidence and policy suites" description={description} current="overview">
   <section class="hero">
     <div class="wrap">
+      <div class="hero-title">
+      <p class="eyebrow"><span class="signal-dot"></span>PostgreSQL recovery verification</p>
       <h1>Nostekon</h1>
-      <p class="lead">Find out whether a restore really worked. Rehearse a PostgreSQL backup, check what came back, and keep original evidence you can independently evaluate again.</p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="/demo/index.html#/suite">Open the policy suite</a>
-        <a class="btn" href="#quickstart">Run the local app</a>
+      <p class="hero-statement">Backups are a promise.<br /><span>Restores need evidence.</span></p>
       </div>
-      <p class="hero-note">Pre-alpha. Real captures from two disposable k3d clusters. The browser demo never contacts a cluster; lab execution in the packaged app is disabled by default.</p>
+      <div class="hero-copy">
+      <p class="lead">Rehearse a PostgreSQL backup. See what survived. Keep original evidence you can independently evaluate again.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/demo/index.html#/suite">Open the policy suite <ArrowRight size={17} /></a>
+        <a class="btn" href="/download/">Get the local app <ArrowDownToLine size={17} /></a>
+      </div>
+      <p class="hero-note">Open source. Pre-alpha. The demo reviews evidence, never your cluster.</p>
+      </div>
     </div>
   </section>
 
-  <section class="wrap" aria-label="Screenshot">
-    <Shot name="policy-suite" height={900} alt="Nostekon policy suite with three recorded V4 outcomes: zero loss verified, strict tail loss failed as expected, and budgeted tail loss verified. The independently evaluated suite gate passes." caption="Three real lab captures, one independent policy gate. The strict zero-loss policy fails on two lost writes, as expected; the budgeted policy accepts the measured loss. Signatures remain unverified." />
+  <section class="wrap product-showcase" aria-label="Screenshot">
+    <EvidenceShowcase />
   </section>
 
   <section class="section">
@@ -43,22 +48,22 @@ const steps = [
         <h2>What a report tells you</h2>
         <p class="section-lead">One verdict, and the reasons behind it.</p>
       </div>
-      <dl class="facts">
+      <dl class="facts report-facts">
         <div>
-          <dt>How deep recovery went</dt>
-          <dd>Five levels, from "the backup job succeeded" to "the data is correct". The report names the deepest level that passed in order, and the first check that failed.</dd>
+          <dt><FileCheck2 size={19} />How deep recovery went</dt>
+          <dd>V0 to V4, from job completion to declared data checks. See the deepest level passed and the first failure.</dd>
         </div>
         <div>
-          <dt>How long it took</dt>
-          <dd>Recovery time runs from the moment of failure to completion, split into phases, with any time no phase accounts for shown separately.</dd>
+          <dt><ArrowRight size={19} />How long it took</dt>
+          <dd>Failure to completion, split into recovery phases. Unaccounted time stays visible.</dd>
         </div>
         <div>
-          <dt>How much data was lost</dt>
-          <dd>If you record acknowledged writes, Nostekon compares them with what came back and reports the loss window and any gaps in the sequence.</dd>
+          <dt><Database size={19} />How much data was lost</dt>
+          <dd>With a write ledger, compare acknowledged writes with recovered IDs. Missing writes and sequence gaps stay visible.</dd>
         </div>
         <div>
-          <dt>What it cannot tell you</dt>
-          <dd>A report judges the evidence it is given. A signature shows the file was not changed afterwards. It does not show the runner told the truth. <a class="link" href="/evidence/">More on the evidence model</a>.</dd>
+          <dt><Fingerprint size={19} />What it cannot tell you</dt>
+          <dd>Evidence is not independent capture. A signature protects bytes, not the truth of the runner's claims. <a class="link" href="/evidence/">Evidence model</a>.</dd>
         </div>
       </dl>
     </div>
@@ -79,8 +84,8 @@ const steps = [
   <section class="section">
     <div class="wrap">
       <div class="section-head">
-        <h2>How a drill runs</h2>
-        <p class="section-lead">The whole flow, with what exists today marked.</p>
+        <h2>From backup to review</h2>
+        <p class="section-lead">Running a rehearsal and judging its evidence are separate jobs.</p>
       </div>
       <ol class="steps">
         {steps.map((step) => (
@@ -140,24 +145,16 @@ const steps = [
         <div>
           <h3>Works today</h3>
           <ul class="ticks">
-            <li>Validate drill files from the CLI, the API or Studio</li>
-            <li>Rehearse bounded PostgreSQL custom-format backups with snapshot counts and semantic checks</li>
-            <li>Author validation profiles in Studio and independently review bound restore plans</li>
-            <li>Run a three-case PostgreSQL policy suite across two local k3d clusters, checked through V4</li>
-            <li>Review, save and reopen suite snapshots with original-file downloads</li>
-            <li>Verify portable host-job bundles and independently gate captured suites in CI</li>
-            <li>Evaluate evidence: level reached, recovery time by phase, exact data loss from a write ledger</li>
-            <li>Sign with the CLI; verify in Studio or the browser using explicit public-key trust and revocation</li>
-            <li>Push recovery metrics to Prometheus and chart them on a bundled Grafana dashboard</li>
+            <li>Bounded PostgreSQL backup rehearsals and isolated lab suites</li>
+            <li>Semantic profiles, original evidence, saved comparisons and independent CI gates</li>
+            <li>Explicit signature trust, portable evidence and recovery metrics</li>
           </ul>
         </div>
         <div>
           <h3>Not built yet</h3>
           <ul class="ticks todo">
-            <li>Scheduled drills</li>
-            <li>Production recovery orchestration and complete application recovery</li>
-            <li>Business-specific checks beyond not-null, uniqueness and foreign keys</li>
-            <li>Collecting evidence from the system itself instead of trusting the runner</li>
+            <li>Scheduled drills, production orchestration and complete application recovery</li>
+            <li>Full business correctness and independently captured system evidence</li>
             <li>Authenticated operator identity and trusted signing timestamps</li>
           </ul>
         </div>

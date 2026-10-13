@@ -1,7 +1,9 @@
 ---
 import ProductLayout from "../layouts/ProductLayout.astro";
+import EvidenceShowcase from "../components/EvidenceShowcase.astro";
+import { ArrowRight, Database, FileJson, ListChecks, ShieldCheck } from "@lucide/astro";
 
-const description = "What Nostekon is made of and where its boundaries are: the drill specification, DrillRun evidence, the V0 to V4 evaluator, and one disposable PostgreSQL lab restore.";
+const description = "From PostgreSQL backup rehearsal to independently evaluated evidence: Nostekon workflows, semantic profiles, reports and explicit recovery boundaries.";
 
 const layers = [
   { kicker: "Declare", title: "Drill specification", text: "A versioned file that names the failure scenario, the target, the restore location, how deep to verify, and your recovery time and data loss goals.", detail: "YAML in, strict validation, errors that name the field", state: "Available", later: false },
@@ -13,12 +15,34 @@ const layers = [
 <ProductLayout title="Product" description={description} current="product">
   <section class="page-title">
     <div class="wrap">
-      <h1>What Nostekon is made of</h1>
-      <p class="lead">Nostekon keeps three things apart: what you intended, what happened, and what can be proven. The line to keep in mind is that today's evaluator reads recorded evidence. It does not perform a restore.</p>
+      <p class="eyebrow">The recovery evidence workbench</p>
+      <h1>Nostekon</h1>
+      <p class="lead">What you intended. What happened. What the evidence actually supports. Separate tools for running a rehearsal and reviewing its results.</p>
+      <div class="hero-actions"><a class="btn btn-primary" href="/demo/index.html#/suite">Explore Studio <ArrowRight size={17} /></a><a class="btn" href="/download/">Get the local app</a></div>
     </div>
   </section>
 
-  <section class="wrap">
+  <section class="section product-flow"><div class="wrap">
+    <div class="section-head"><p class="eyebrow">One workflow, distinct responsibilities</p><h2>Restore. Record. Review.</h2></div>
+    <ol class="flow-track">
+      <li><Database size={24} /><span class="flow-number">01 / Rehearse</span><h3>An isolated restore</h3><p>The Python CLI restores approved custom-format backups into a disposable database, or runs the fixed two-cluster lab.</p></li>
+      <li><FileJson size={24} /><span class="flow-number">02 / Capture</span><h3>Original evidence</h3><p>Checks, timings and optional write-ledger measurements remain in versioned JSON, including failures and gaps.</p></li>
+      <li><ShieldCheck size={24} /><span class="flow-number">03 / Evaluate</span><h3>An independent verdict</h3><p>The shared Go engine reviews the same original inputs in Studio, the local API and CI. It does not run the restore.</p></li>
+    </ol>
+  </div></section>
+
+  <section class="wrap product-showcase" aria-label="Product evidence previews"><EvidenceShowcase /></section>
+
+  <section class="section"><div class="wrap">
+    <div class="section-head"><p class="eyebrow">Bring your own checks</p><h2>More than a successful backup job</h2><p class="section-lead">A matching row count can still hide nulls, duplicate IDs or orphaned references.</p></div>
+    <dl class="facts">
+      <div><dt>Author a semantic profile</dt><dd>Start from Orders or Inventory, then define not-null, uniqueness and foreign-key checks. Structure validation is not data validation. <a class="link" href="/demo/index.html#/profiles">Author a validation profile</a>.</dd></div>
+      <div><dt>Bind the rehearsal inputs</dt><dd>A restore plan binds the archive, image and snapshot expectations. Review original plan and run evidence together. Checksums bind bytes, not operator identity. <a class="link" href="/docs/guides/postgresql-backup-rehearsal/">Backup rehearsal guide</a>.</dd></div>
+    </dl>
+  </div></section>
+
+  <section class="section"><div class="wrap">
+    <div class="section-head"><p class="eyebrow"><ListChecks size={15} />Under the hood</p><h2>Explicit formats. Shared evaluation.</h2></div>
     <div class="rows">
       {layers.map((layer) => (
         <div class="row">
@@ -34,7 +58,7 @@ const layers = [
         </div>
       ))}
     </div>
-  </section>
+  </div></section>
 
   <section class="section" style="margin-top: 48px;">
     <div class="wrap">
