@@ -1,4 +1,4 @@
-import { Activity, FileCheck2, FlaskConical, LayoutList, Moon, PencilRuler, RefreshCw, Play, Sun } from "lucide-react";
+import { ExternalLink, FileCheck2, FlaskConical, Info, LayoutList, Moon, PencilRuler, RefreshCw, Play, Sun } from "lucide-react";
 import nostekonMark from "../../site/src/content/docs/assets/nostekon-mark.svg";
 import { useCallback, useEffect, useState } from "react";
 import { request } from "./api";
@@ -82,12 +82,12 @@ export function App() {
           </a>
         </nav>
         <a className="workbench-link" href={browserDemo ? "/" : "https://github.com/jagarkarlo/nostekon"} title={browserDemo ? "Open the product site" : "Open the project"}>
-          <Activity size={14} /> <span>{browserDemo ? "Product site" : "Project"}</span>
+          <ExternalLink size={14} /> <span>{browserDemo ? "Product site" : "Project"}</span>
         </a>
         <button className="studio-theme" data-theme-toggle type="button" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           {theme === "dark" ? <Sun size={18} data-theme-icon="sun" aria-hidden="true" /> : <Moon size={18} data-theme-icon="moon" aria-hidden="true" />}
         </button>
-        <button className="studio-theme" type="button" aria-label="About Nostekon" title="About Nostekon" onClick={() => setAboutOpen(true)}><Activity size={18} aria-hidden="true" /></button>
+        <button className="studio-theme" type="button" aria-label="About Nostekon" title="About Nostekon" onClick={() => setAboutOpen(true)}><Info size={18} aria-hidden="true" /></button>
         <button className={`api-status ${apiState}`} type="button" onClick={() => void checkAPI()} title="Recheck the local API">
           <span className="status-dot" />
           {apiLabel}

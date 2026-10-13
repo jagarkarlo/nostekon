@@ -2,7 +2,7 @@
 import ProductLayout from '../layouts/ProductLayout.astro';
 import Shot from '../components/Shot.astro';
 
-const description = 'Nostekon runs isolated PostgreSQL recovery drills, checks acknowledged-write loss and independently gates policy suites. Review original evidence in the local app or browser demo.';
+const description = 'Rehearse PostgreSQL restores, author semantic validation profiles and independently review original recovery evidence in Nostekon Studio or CI.';
 
 const install = `git clone https://github.com/jagarkarlo/nostekon.git
 cd nostekon
@@ -24,7 +24,7 @@ const steps = [
   <section class="hero">
     <div class="wrap">
       <h1>Nostekon</h1>
-      <p class="lead">Find out whether a restore really worked. Run isolated PostgreSQL drills, inspect acknowledged-write loss, and gate three recovery policies with independently evaluated evidence.</p>
+      <p class="lead">Find out whether a restore really worked. Rehearse a PostgreSQL backup, check what came back, and keep original evidence you can independently evaluate again.</p>
       <div class="hero-actions">
         <a class="btn btn-primary" href="/demo/index.html#/suite">Open the policy suite</a>
         <a class="btn" href="#quickstart">Run the local app</a>
@@ -66,15 +66,13 @@ const steps = [
 
   <section class="section">
     <div class="wrap">
-      <div class="section-head"><h2>Keep the evidence, not just a green result</h2><p class="section-lead">A review is reproducible from the original inputs.</p></div>
+      <div class="section-head"><h2>Keep the evidence, not just a green result</h2><p class="section-lead">From a backup to a review you can reproduce.</p></div>
       <dl class="facts">
-        <div><dt>Review the whole suite</dt><dd>Compare expected and evaluated case verdicts, recovered writes, loss windows and RPO budgets. An expected policy failure is not mistaken for a broken restore.</dd></div>
-        <div><dt>Reopen original captures</dt><dd>Save a suite snapshot, reopen it after reload, and evaluate it again. Original-file downloads and case Runs remain independent; failed and partial captures are retained without inventing missing evidence.</dd></div>
-        <div><dt>Move a host-job capture</dt><dd>Export a bounded evidence bundle and verify its manifest before import. A checksum detects changed files; it does not authenticate who captured them.</dd></div>
-        <div><dt>Verify signed originals</dt><dd>Save original evidence with its attached sidecar, reopen it for fresh verification, or transfer exact originals as a ZIP. Authenticate public-key fingerprints independently; imports and saved attachments never grant trust. Local revocation stays in effect, and a valid signature never overrides a failed recovery.</dd></div>
-        <div><dt>Use the same gate in CI</dt><dd>The browser and native Go CLI produce the same review. Exit 0 means the complete expected policy suite passed; incomplete or mismatching evidence does not get a green gate.</dd></div>
+        <div><dt>Rehearse an existing backup</dt><dd>Restore a bounded PostgreSQL custom-format archive into a disposable local database. Check snapshot row counts and optional semantic rules. <a class="link" href="/docs/guides/postgresql-backup-rehearsal/">Backup rehearsal guide</a>.</dd></div>
+        <div><dt>Choose the checks that matter</dt><dd>Author not-null, uniqueness and foreign-key profiles in Studio, then export exact JSON for the runner. Validating a profile checks its structure, not your data. <a class="link" href="/demo/index.html#/profiles">Author a validation profile</a>.</dd></div>
+        <div><dt>Reopen and compare originals</dt><dd>Save runs, compare outcomes and transfer original evidence with attached plans or signatures. Imported files never grant trust, and a valid signature never overrides a failed recovery. <a class="link" href="/demo/index.html#/runs">Browse recovery evidence</a>.</dd></div>
+        <div><dt>Use the same gate in CI</dt><dd>The browser and Go CLI independently evaluate the same inputs. A complete expected policy suite passes; incomplete or mismatching evidence does not get a green gate. <a class="link" href="/docs/guides/k3d-isolated-restore/">Suite workflow</a>.</dd></div>
       </dl>
-      <p class="prose" style="margin-top: 24px;"><a class="link" href="/docs/guides/k3d-isolated-restore/">Read the suite and evidence workflow</a></p>
     </div>
   </section>
 
@@ -125,7 +123,7 @@ const steps = [
           <h3>3. Run a disposable restore</h3>
           <p>For a new capture, follow the isolated lab walkthrough. It requires Docker, k3d, kubectl, Python 3.12+ and Go, and deletes only the dedicated lab namespaces.</p>
           <p><a class="link" href="/docs/guides/k3d-isolated-restore/">Set up the two-cluster lab</a></p>
-          <p class="code-note">Execution requires explicit host opt-in. The review container cannot run drills. Application-specific recovery and production restores are not supported.</p>
+          <p class="code-note">Execution requires explicit host opt-in. The review container cannot run drills. Production recovery orchestration is not supported; custom-backup rehearsals use the separate Python CLI.</p>
           <p><a class="link" href="/docs/start/">CLI setup, trusted-key verification and runtime details</a></p>
         </div>
       </div>
@@ -143,6 +141,8 @@ const steps = [
           <h3>Works today</h3>
           <ul class="ticks">
             <li>Validate drill files from the CLI, the API or Studio</li>
+            <li>Rehearse bounded PostgreSQL custom-format backups with snapshot counts and semantic checks</li>
+            <li>Author validation profiles in Studio and independently review bound restore plans</li>
             <li>Run a three-case PostgreSQL policy suite across two local k3d clusters, checked through V4</li>
             <li>Review, save and reopen suite snapshots with original-file downloads</li>
             <li>Verify portable host-job bundles and independently gate captured suites in CI</li>
@@ -155,8 +155,8 @@ const steps = [
           <h3>Not built yet</h3>
           <ul class="ticks todo">
             <li>Scheduled drills</li>
-            <li>Restoring real applications rather than a seeded table</li>
-            <li>Application-specific correctness checks at V4</li>
+            <li>Production recovery orchestration and complete application recovery</li>
+            <li>Business-specific checks beyond not-null, uniqueness and foreign keys</li>
             <li>Collecting evidence from the system itself instead of trusting the runner</li>
             <li>Authenticated operator identity and trusted signing timestamps</li>
           </ul>

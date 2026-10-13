@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowRight, ArrowUpRight, CheckCircle2, Database, Download, FileJson, FlaskConical, GitCompareArrows, Paperclip, Search, Trash2, Upload, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowRight, ArrowUpRight, Database, Download, FileCheck2, FileJson, FlaskConical, GitCompareArrows, ListChecks, Paperclip, Search, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { formatDuration, isReport } from "./report";
 import type { Report } from "./report";
@@ -15,6 +15,7 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  const [exampleFilter, setExampleFilter] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [compare, setCompare] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<SavedRun | null>(null);
@@ -97,6 +98,8 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
   const matching = runs.filter((run) => (filter === "all" || run.report.verdict === filter) &&
     `${run.report.name} ${run.report.scenario ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   const compared = selected.map((id) => runs.find((run) => run.id === id)).filter((run): run is SavedRun => !!run);
+  const exampleCounts = { all: samples.length, recorded: samples.filter(sample => sample.recorded).length, synthetic: samples.filter(sample => !sample.recorded).length };
+  const visibleExamples = samples.filter(sample => exampleFilter === "all" || sample.recorded === (exampleFilter === "recorded"));
 
   return <main className="run-library">
     <header className="library-heading">
@@ -116,22 +119,28 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
       if (file.size > 16 * 1024 * 1024) { setError("Evidence exceeds the 16 MiB limit."); return; }
       void file.text().then((source) => onOpen(source, "")).catch((reason: unknown) => setError(message(reason)));
     }} />
-    <section className="library-stats" aria-label="Saved run totals">
+    {runs.length > 0 && <section className="library-stats" aria-label="Saved run totals">
       <div><span>Saved runs</span><strong>{runs.length}</strong></div>
       <div><span>Verified</span><strong className="ok">{runs.filter((run) => run.report.verdict === "verified").length}</strong></div>
       <div><span>Needs attention</span><strong className="attention">{runs.filter((run) => run.report.verdict !== "verified").length}</strong></div>
       <div><span>With RPO evidence</span><strong>{runs.filter((run) => run.report.rpo !== null).length}</strong></div>
-    </section>
+    </section>}
+    {!loading && runs.length === 0 && <nav className="workspace-shortcuts" aria-label="Workspace shortcuts">
+      <a href="#/suite"><ListChecks size={20} /><span>Review a policy suite</span><ArrowRight size={16} /></a>
+      <a href="#/profiles"><FileCheck2 size={20} /><span>Author a validation profile</span><ArrowRight size={16} /></a>
+    </nav>}
     {error && <p className="banner bad" role="alert">{error}</p>}
     {backupResult && <p className="banner good" role="status" aria-label="Run backup restore result">{backupResult}</p>}
     <section className="saved-runs" aria-labelledby="saved-heading">
       <div className="section-toolbar">
         <h2 id="saved-heading">Run history <span>{runs.length}</span></h2>
+        {runs.length > 0 && <>
         <label className="run-search"><Search size={15} /><input type="search" placeholder="Search runs" aria-label="Search runs" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         <select aria-label="Filter verdict" value={filter} onChange={(event) => setFilter(event.target.value)}>
           <option value="all">All verdicts</option><option value="verified">Verified</option><option value="failed">Failed</option><option value="incomplete">Incomplete</option>
         </select>
         <button type="button" className="tool compare-action" disabled={selected.length !== 2} onClick={() => setCompare(!compare)}><GitCompareArrows size={15} /> {compare ? "Close comparison" : `Compare (${selected.length}/2)`}</button>
+        </>}
       </div>
       {loading ? <p className="library-empty" role="status">Loading saved runs...</p> : matching.length === 0 ? <div className="library-empty">
         <FileJson size={25} /><h3>{runs.length ? "No matching runs" : "No saved runs yet"}</h3>
@@ -152,10 +161,12 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
     </section>
     {compare && compared.length === 2 && <RunComparison runs={compared} onClose={() => setCompare(false)} />}
     <section className="sample-section" aria-labelledby="examples-heading">
-      <div className="section-toolbar"><h2 id="examples-heading">Example evidence</h2><span className="workspace-label">{samples.filter((sample) => sample.recorded).length} recorded lab · {samples.filter((sample) => !sample.recorded).length} synthetic</span></div>
-      <div className="sample-rows">{samples.map((sample) => <button type="button" key={sample.id} onClick={() => {
+      <div className="section-toolbar"><h2 id="examples-heading">Example evidence</h2><div className="example-filter" role="group" aria-label="Example source">
+        {([{ id: "all", label: "All examples" }, { id: "recorded", label: "Recorded lab" }, { id: "synthetic", label: "Synthetic" }] as const).map(option => <button type="button" key={option.id} aria-label={option.label} aria-pressed={exampleFilter === option.id} onClick={() => setExampleFilter(option.id)}>{option.label}<span aria-hidden="true">{exampleCounts[option.id]}</span></button>)}
+      </div></div>
+      <div className="sample-rows">{visibleExamples.map((sample) => <button type="button" key={sample.id} onClick={() => {
         void sample.load().then((source) => onOpen(source, sample.id)).catch((reason: unknown) => setError(message(reason)));
-      }}><span className={`sample-symbol ${sample.recorded ? "recorded" : ""}`}>{sample.recorded ? <CheckCircle2 size={20} /> : <FlaskConical size={20} />}</span><span><strong>{sample.label}</strong><small>{sample.summary}</small></span><ArrowRight size={17} /></button>)}</div>
+      }}><span className={`sample-symbol ${sample.recorded ? "recorded" : ""}`}>{sample.recorded ? <Database size={20} /> : <FlaskConical size={20} />}</span><span className="sample-copy"><strong>{sample.label}</strong><small>{sample.summary}</small></span><ArrowRight size={17} /></button>)}</div>
     </section>
     <dialog ref={restoreDialog} className="delete-dialog" aria-labelledby="restore-title" onCancel={event => { if (backupBusy) event.preventDefault(); else setPendingRestore(undefined); }}>
       <h2 id="restore-title">Restore {pendingRestore?.length ?? 0} saved runs?</h2>

@@ -24,6 +24,59 @@ function evidenceArchive(files: Awaited<ReturnType<typeof suiteBundle>>) {
 }
 
 for (const width of [390, 1440]) {
+  test(`product workflows and real preview at ${width}px`, async ({ page }) => {
+    test.skip(!!process.env.NOSTEKON_APP_URL, "Product page belongs to the static site.");
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Nostekon", exact: true })).toBeVisible();
+    const preview = page.locator(".shot img:visible");
+    await expect(preview).toBeVisible();
+    await expect.poll(() => preview.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+    expect((await preview.boundingBox())!.y).toBeLessThan(1000);
+    for (const theme of ["dark", "light"]) {
+      if (await page.locator("html").getAttribute("data-theme") !== theme) await page.locator("[data-theme-toggle]").click();
+      await expect.poll(() => preview.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+      await page.evaluate(() => scrollTo(0, 0));
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: test.info().outputPath(`product-${width}-${theme}.png`), fullPage: true });
+    }
+    const guide = await page.getByRole("link", { name: "Backup rehearsal guide", exact: true }).getAttribute("href");
+    expect((await page.request.get(guide!)).status()).toBe(200);
+    await page.getByRole("link", { name: "Author a validation profile", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Validation profiles", exact: true })).toBeVisible();
+  });
+
+  test(`calm workspace and browsable evidence at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(process.env.NOSTEKON_APP_URL ? "/#/runs" : "/demo/#/runs");
+    await expect(page.getByRole("heading", { name: "No saved runs yet", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Saved run totals" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Workspace shortcuts" })).toBeVisible();
+    const examples = page.locator(".sample-rows button");
+    await expect(examples).toHaveCount(7);
+    await page.getByRole("button", { name: "Recorded lab", exact: true }).click();
+    await expect(examples).toHaveCount(5);
+    await expect(page.getByRole("button", { name: "Recorded lab", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Synthetic", exact: true }).click();
+    await expect(examples).toHaveCount(2);
+    await page.getByRole("button", { name: "All examples", exact: true }).click();
+    await expect(examples).toHaveCount(7);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.evaluate(() => scrollTo(0, 0));
+    const header = await page.locator(".topbar").boundingBox();
+    const heading = await page.getByRole("heading", { name: "Recovery runs", exact: true }).boundingBox();
+    expect(heading!.y).toBeGreaterThanOrEqual(header!.y + header!.height);
+    await page.screenshot({ path: test.info().outputPath(`workspace-${width}.png`), fullPage: true, animations: "disabled" });
+    await page.getByRole("button", { name: /Switch to .* mode/ }).click();
+    await page.evaluate(() => scrollTo(0, 0));
+    await page.screenshot({ path: test.info().outputPath(`workspace-alternate-${width}.png`), fullPage: true, animations: "disabled" });
+    await page.getByRole("link", { name: "Author a validation profile", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Validation profiles", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Runs", exact: true }).click();
+    await page.getByRole("link", { name: "Review a policy suite", exact: true }).click();
+    await expect(page).toHaveURL(/#\/suite$/);
+  });
+
   test(`semantic profile authoring and exact originals at ${width}px`, async ({ page }) => {
     const inventory = await readFile(new URL("../../examples/validation-profiles/inventory.json", import.meta.url));
     await page.setViewportSize({ width, height: 1000 });
@@ -1428,7 +1481,8 @@ for (const width of [390, 1440]) {
     test(`recorded ledger ${sample.label} at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/demo/");
-      await expect(page.locator(".sample-section")).toContainText("5 recorded lab · 2 synthetic");
+      await expect(page.getByRole("button", { name: "Recorded lab", exact: true })).toContainText("5");
+      await expect(page.getByRole("button", { name: "Synthetic", exact: true })).toContainText("2");
       await page.getByRole("button", { name: new RegExp(sample.label) }).click();
       await expect(page.getByRole("heading", { name: sample.heading })).toBeVisible();
       await expect(page.locator(".sample-caveat")).toContainText("Recorded local lab run");
