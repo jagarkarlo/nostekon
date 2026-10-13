@@ -8,6 +8,7 @@ RUN --mount=type=secret,id=npm_ca \
 COPY studio/ ./studio/
 COPY examples/runs/ ./examples/runs/
 COPY examples/suites/postgresql-policy/ ./examples/suites/postgresql-policy/
+COPY examples/validation-profiles/ ./examples/validation-profiles/
 COPY site/src/content/docs/assets/nostekon-mark.svg ./site/src/content/docs/assets/nostekon-mark.svg
 RUN npm run build --prefix studio
 

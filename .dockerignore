@@ -22,6 +22,9 @@ examples/suites/*
 !examples/suites/postgresql-policy/
 examples/suites/postgresql-policy/*
 !examples/suites/postgresql-policy/*.json
+!examples/validation-profiles/
+examples/validation-profiles/*
+!examples/validation-profiles/*.json
 !site/
 site/*
 !site/src/
