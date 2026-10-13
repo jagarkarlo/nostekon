@@ -458,6 +458,11 @@ strict, bound null/uniqueness/reference rules evaluated with generated read-only
 queries. At least one snapshot-specific count is required; passing proves only
 selected rules, not complete business correctness. Full scopes and measured
 violations remain visible in Studio and its Markdown export.
+Reusable [orders](examples/validation-profiles/orders.json) and
+[inventory](examples/validation-profiles/inventory.json) starters include explicit
+mandatory references and parent-key checks. Synthetic real-Docker regressions
+prove equal row counts cannot hide the covered semantic corruption. Adapt these
+examples with the backup owner; they are not approved business contracts.
 Each attempt keeps a private locked `OUTPUT.json.recovery` checkpoint. After a
 hard stop or failed cleanup, inspect it without mutation:
 

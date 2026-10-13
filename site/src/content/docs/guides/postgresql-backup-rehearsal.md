@@ -233,6 +233,78 @@ includes complete reported V4 details, and original JSON export remains exact.
 Passing means only the selected rules and preceding levels passed. It does not
 prove full application correctness, authenticated capture, incident RTO or RPO.
 
+## Reusable profile starters
+
+Source checkouts include two profiles tested with synthetic PostgreSQL 16.8
+custom archives. Copy and adapt a starter before planning; it is not an approved
+business contract or an instruction to run against production.
+
+| Starter | Relations and selected coverage | Rules |
+| --- | --- | --- |
+| [Orders](https://github.com/jagarkarlo/nostekon/blob/main/examples/validation-profiles/orders.json) | Required, unique customer/order IDs; required order customer ID with an existing customer | 6 |
+| [Inventory](https://github.com/jagarkarlo/nostekon/blob/main/examples/validation-profiles/inventory.json) | Required, unique product/warehouse/stock IDs; required stock product and warehouse IDs with existing parents | 10 |
+
+These starters assume every child reference is mandatory. If the domain permits
+an absent customer, product or warehouse, ask the owner to review the matching
+`not_null` rule rather than copying that assumption unchanged. Parent uniqueness
+is checked separately from reference existence. Inventory does not check stock
+quantity, reservations, composite product/warehouse uniqueness or valuation;
+orders do not check totals, currency or lifecycle transitions. Those rules are
+not supported by the current single-column profile schema.
+
+From the source checkout, create a working copy without overwriting an existing
+profile:
+
+```bash
+mkdir -p profiles plans evidence
+cp --no-clobber examples/validation-profiles/inventory.json profiles/inventory.json
+```
+
+Have the owner review relation names, key types, mandatory fields and omitted
+business rules in that copy. Set `BACKUP` to the approved frozen custom archive,
+and `PRODUCT_COUNT`, `WAREHOUSE_COUNT` and `STOCK_COUNT` to independently recorded
+counts from that same snapshot. Do not substitute the synthetic test counts.
+Choose new plan and evidence output names:
+
+```bash
+nostekon backup plan \
+  --file "${BACKUP:?Set the approved archive path}" \
+  --output plans/inventory-plan.json \
+  --expect-table "public.products=${PRODUCT_COUNT:?Set the snapshot count}" \
+  --expect-table "public.warehouses=${WAREHOUSE_COUNT:?Set the snapshot count}" \
+  --expect-table "public.stock=${STOCK_COUNT:?Set the snapshot count}" \
+  --validation-profile profiles/inventory.json &&
+nostekon backup preflight \
+  --file "${BACKUP:?}" --plan plans/inventory-plan.json
+```
+
+Stop on any nonzero exit. Obtain owner approval of the isolated host before
+continuing with execution:
+
+```bash
+nostekon backup restore \
+  --file "${BACKUP:?}" --plan plans/inventory-plan.json \
+  --output evidence/inventory-rehearsal.run.json &&
+nostekon-report --backup-plan plans/inventory-plan.json \
+  evidence/inventory-rehearsal.run.json
+```
+
+Stop after any nonzero command exit; do not execute the block unattended. A
+preflight pass remains a prerequisites check, not a restore verdict. The final
+independent gate must evaluate the original plan and capture. On failed checks,
+retain both originals, identify each measured V4 violation with the owner, and
+follow the existing cleanup/recovery instructions before another attempt. Do
+not lower expectations or remove a rule just to produce a pass.
+
+Verified on 2026-10-13 using the existing opt-in Docker integration test: both
+starters pass on matching synthetic data. Corrupted variants keep every declared
+row count unchanged, pass all V3 counts, and fail the exact expected V4 rules for
+duplicate IDs, missing mandatory values and orphan references. Independent Go
+review confirms complete, matching but failed captures, unauthenticated
+provenance and no RPO measurement; all owned restore targets are removed. This
+does not validate a production schema, the owner's business rules or crash
+recovery of an application using these examples.
+
 ## Restore and evaluate
 
 For an ad hoc rehearsal without a saved plan, use a backup from the approved
