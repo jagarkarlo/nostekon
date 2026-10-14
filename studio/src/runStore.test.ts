@@ -121,6 +121,19 @@ describe("saved run library", () => {
     expect(await listRuns()).toHaveLength(1);
   });
 
+  it("retains exact backup preflights across reopen and unsigned updates, with explicit removal", async () => {
+    const source = '{ "run": "backup preflight rehearsal" }\n';
+    const backupPlan = '{ "kind": "PostgreSQLRestorePlan", "original": true }\n';
+    const backupPreflight = '{ "kind": "PostgreSQLBackupPreflight", "original": true }\n';
+    await saveRuns([{ source, report, backupPlan, backupPreflight }]);
+    await saveRuns([{ source, report: { ...report, headline: "Fresh evaluation" } }]);
+    const reopened = (await listRuns())[0];
+    expect(reopened.backupPlan).toBe(backupPlan);
+    expect(reopened.backupPreflight).toBe(backupPreflight);
+    await saveRuns([{ source, report, backupPreflight: "" }]);
+    expect((await listRuns())[0].backupPreflight).toBe("");
+  });
+
   it("rejects malformed and oversized plans before any batch write", async () => {
     for (const backupPlan of ["not JSON", "null", "[]", JSON.stringify({ text: "\u00e9".repeat(9 * 1024) })]) {
       await expect(saveRuns([{ source: "first", report }, { source: "second", report, backupPlan }])).rejects.toThrow("Attached backup plan");

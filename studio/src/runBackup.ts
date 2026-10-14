@@ -1,10 +1,11 @@
 import { RUN_LIMIT } from "./runStore";
 
 export const MAX_RUN_BACKUP_BYTES = 64 * 1024 * 1024;
-export interface OriginalRun { source: string; attestation?: string; backupPlan?: string }
+export interface OriginalRun { source: string; attestation?: string; backupPlan?: string; backupPreflight?: string }
 const encoder = new TextEncoder();
 const version = "nostekon/run-backup/v1alpha1";
 const planVersion = "nostekon/run-backup/v2alpha1";
+const preflightVersion = "nostekon/run-backup/v3alpha1";
 
 function object(value: unknown, allowed: string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !allowed.includes(key))) throw new Error("Unsupported backup fields or object.");
@@ -38,11 +39,17 @@ export async function createRunBackup(inputs: readonly OriginalRun[]): Promise<s
       entry.backupPlan = original(input.backupPlan, 16 * 1024);
       entry.backupPlanSha256 = await digest(entry.backupPlan);
     }
+    if (input.backupPreflight !== undefined && input.backupPreflight !== "") {
+      entry.backupPreflight = original(input.backupPreflight, 16 * 1024);
+      entry.backupPreflightSha256 = await digest(entry.backupPreflight);
+    }
     total += encoder.encode(JSON.stringify(entry)).length + 1;
     if (total > MAX_RUN_BACKUP_BYTES) throw new Error("Run backup exceeds the 64 MiB limit. Export originals individually.");
     runs.push(entry);
   }
-  const encoded = JSON.stringify({ apiVersion: runs.some(run => run.backupPlan !== undefined) ? planVersion : version, kind: "RunBackup", runs });
+  const apiVersion = runs.some(run => run.backupPreflight !== undefined) ? preflightVersion
+    : runs.some(run => run.backupPlan !== undefined) ? planVersion : version;
+  const encoded = JSON.stringify({ apiVersion, kind: "RunBackup", runs });
   await readRunBackup(encoded);
   return encoded;
 }
@@ -50,11 +57,19 @@ export async function createRunBackup(inputs: readonly OriginalRun[]): Promise<s
 export async function readRunBackup(source: string): Promise<OriginalRun[]> {
   if (encoder.encode(source).length > MAX_RUN_BACKUP_BYTES) throw new Error("Run backup exceeds the 64 MiB limit.");
   const backup = object(JSON.parse(source), ["apiVersion", "kind", "runs"]);
-  if ((backup.apiVersion !== version && backup.apiVersion !== planVersion) || backup.kind !== "RunBackup" || !Array.isArray(backup.runs) || !backup.runs.length || backup.runs.length > RUN_LIMIT) throw new Error("Unsupported run backup version, kind or run count.");
+  if (![version, planVersion, preflightVersion].includes(String(backup.apiVersion)) || backup.kind !== "RunBackup" || !Array.isArray(backup.runs) || !backup.runs.length || backup.runs.length > RUN_LIMIT) throw new Error("Unsupported run backup version, kind or run count.");
   const identities = new Set<string>();
   const runs: OriginalRun[] = [];
   for (const value of backup.runs) {
-    const entry = object(value, ["sha256", "evidence", "attestation", "attestationSha256", ...(backup.apiVersion === planVersion ? ["backupPlan", "backupPlanSha256"] : [])]);
+    const allowed = [
+      "sha256",
+      "evidence",
+      "attestation",
+      "attestationSha256",
+      ...(backup.apiVersion === planVersion || backup.apiVersion === preflightVersion ? ["backupPlan", "backupPlanSha256"] : []),
+      ...(backup.apiVersion === preflightVersion ? ["backupPreflight", "backupPreflightSha256"] : []),
+    ];
+    const entry = object(value, allowed);
     const evidence = original(entry.evidence, 16 * 1024 * 1024);
     if (typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.sha256) || await digest(evidence) !== entry.sha256) throw new Error("Evidence integrity check failed.");
     if (identities.has(entry.sha256)) throw new Error("Duplicate backup run identity.");
@@ -71,6 +86,10 @@ export async function readRunBackup(source: string): Promise<OriginalRun[]> {
       run.backupPlan = original(entry.backupPlan, 16 * 1024);
       if (await digest(run.backupPlan) !== entry.backupPlanSha256) throw new Error("Backup plan integrity check failed.");
     } else if (entry.backupPlanSha256 !== undefined) throw new Error("Missing backup plan original.");
+    if (entry.backupPreflight !== undefined) {
+      run.backupPreflight = original(entry.backupPreflight, 16 * 1024);
+      if (await digest(run.backupPreflight) !== entry.backupPreflightSha256) throw new Error("Backup preflight integrity check failed.");
+    } else if (entry.backupPreflightSha256 !== undefined) throw new Error("Missing backup preflight original.");
     runs.push(run);
   }
   return runs;

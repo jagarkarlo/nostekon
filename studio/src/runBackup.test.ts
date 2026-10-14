@@ -27,6 +27,23 @@ describe("original-run backups", () => {
     }
   });
 
+  it("round-trips original preflights in v3 with an independent hash and rejects v1/v2 smuggling", async () => {
+    const backupPlan = '{ "kind": "PostgreSQLRestorePlan", "original": true }\n';
+    const backupPreflight = '{ "kind": "PostgreSQLBackupPreflight", "original": true }\n';
+    const encoded = await createRunBackup([{ source, backupPlan, backupPreflight }]);
+    const backup = JSON.parse(encoded);
+    expect(backup.apiVersion).toBe("nostekon/run-backup/v3alpha1");
+    expect(backup.runs[0].backupPreflight).toBe(backupPreflight);
+    expect(backup.runs[0].backupPreflightSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(await readRunBackup(encoded)).toEqual([{ source, backupPlan, backupPreflight }]);
+    for (const changed of [
+      { ...backup.runs[0], backupPreflight: backupPreflight + "\n" },
+      { ...backup.runs[0], backupPreflight: undefined },
+      { ...backup.runs[0], backupPreflightSha256: undefined },
+    ]) await expect(readRunBackup(JSON.stringify({ ...backup, runs: [changed] }))).rejects.toThrow();
+    await expect(readRunBackup(JSON.stringify({ ...backup, apiVersion: "nostekon/run-backup/v2alpha1" }))).rejects.toThrow();
+  });
+
   it("preserves exact originals with independent hashes and excludes reports or trust", async () => {
     const run = { source, attestation, report: { verdict: "verified" }, trusted: true, sampleId: "recorded" };
     const encoded = await createRunBackup([run]);

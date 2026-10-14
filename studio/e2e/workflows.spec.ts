@@ -297,21 +297,51 @@ for (const width of [390, 1440]) {
     await page.getByTestId("backup-plan-input").setInputFiles({ name: "original.plan.json", mimeType: "application/json", buffer: plan });
     const gate = page.getByRole("status", { name: "Backup plan gate" });
     await expect(gate).toContainText("Failed");
+    const preflightBuffer = Buffer.from(JSON.stringify({
+      apiVersion: "nostekon/backup-preflight/v1alpha1",
+      kind: "PostgreSQLBackupPreflight",
+      passed: true,
+      backupMatches: true,
+      backup: { sha256: "6d9a0a2794de72ac5c986ccbfa9487c2d7c6a2e2935b27cb0916bac3bf092c50", bytes: 3323 },
+      planSHA256: "988df63edaa9bf7f3f749d22de856f23aec91dfcd167df4e1d5163a8ebb6e7e1",
+      imageId: "sha256:2698c2096ca78a41ae7477580afb30fe36d5368564511b2ea593dbfb26401fdd",
+      requestedLevel: "V4",
+      checks: [
+        { name: "backup-plan-binding", passed: true, detail: "Frozen archive checksum and size match the plan" },
+        { name: "snapshot-count-coverage", passed: true, detail: "At least one table count is declared" },
+        { name: "local-linux-daemon", passed: true, detail: "Local Linux Docker daemon on a supported native architecture" },
+        { name: "daemon-resource-floor", passed: true, detail: "At least 512 MiB and one CPU advertised; free capacity untested" },
+        { name: "native-pinned-image", passed: true, detail: "Exact cached Linux image matches native daemon architecture" },
+      ],
+      limitations: [
+        "Technical prerequisites only; not approval, sanitization or dedicated-host confirmation",
+        "Header/byte binding only; full archive validity and restore success untested",
+        "No restore ran; capture authenticity, incident RTO and acknowledged-write RPO unmeasured",
+      ],
+    }, null, 2) + "\n");
+    await page.getByTestId("backup-preflight-input").setInputFiles({ name: "original.preflight.json", mimeType: "application/json", buffer: preflightBuffer });
+    await expect(page.getByRole("status", { name: "Backup preflight gate" })).toContainText("Ready");
     await page.getByRole("button", { name: "Save run", exact: true }).click();
     await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
     await page.getByRole("link", { name: "Runs", exact: true }).click();
     await page.reload();
     await expect(page.locator(".saved-runs tbody").getByText("Restore plan attached", { exact: true })).toBeVisible();
+    await expect(page.locator(".saved-runs tbody").getByText("Preflight attached", { exact: true })).toBeVisible();
     const planDownload = page.waitForEvent("download");
     await page.getByRole("button", { name: `Download restore plan for ${name}`, exact: true }).click();
     expect(await readFile((await (await planDownload).path())!)).toEqual(plan);
+    const preflightDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: `Download backup preflight for ${name}`, exact: true }).click();
+    expect(await readFile((await (await preflightDownload).path())!)).toEqual(preflightBuffer);
     const backupDownload = page.waitForEvent("download");
     await page.getByRole("button", { name: "Back up saved runs", exact: true }).click();
     const backupBytes = await readFile((await (await backupDownload).path())!);
     const backup = JSON.parse(backupBytes.toString());
-    expect(backup.apiVersion).toBe("nostekon/run-backup/v2alpha1");
+    expect(backup.apiVersion).toBe("nostekon/run-backup/v3alpha1");
     expect(backup.runs[0].backupPlan).toBe(plan.toString());
     expect(backup.runs[0].backupPlanSha256).toBe(createHash("sha256").update(plan).digest("hex"));
+    expect(backup.runs[0].backupPreflight).toBe(preflightBuffer.toString());
+    expect(backup.runs[0].backupPreflightSha256).toBe(createHash("sha256").update(preflightBuffer).digest("hex"));
     expect(backup.runs[0]).not.toHaveProperty("backupReview");
     await page.getByRole("button", { name, exact: true }).click();
     await page.getByRole("tab", { name: "Plan review", exact: true }).click();
@@ -319,6 +349,7 @@ for (const width of [390, 1440]) {
     await expect(gate).toContainText("Complete");
     await expect(gate).toContainText("Matches");
     await expect(gate).toContainText("Unauthenticated provenance");
+    await expect(page.getByRole("status", { name: "Backup preflight gate" })).toContainText("Ready");
     await page.getByRole("link", { name: "Runs", exact: true }).click();
     await page.getByRole("button", { name: `Delete ${name}`, exact: true }).click();
     await page.getByRole("button", { name: "Delete run", exact: true }).click();
@@ -329,6 +360,7 @@ for (const width of [390, 1440]) {
     await page.getByRole("button", { name, exact: true }).click();
     await page.getByRole("tab", { name: "Plan review", exact: true }).click();
     await expect(gate).toContainText("Failed");
+    await expect(page.getByRole("status", { name: "Backup preflight gate" })).toContainText("Ready");
     await page.evaluate(() => {
       const original = crypto.subtle.digest.bind(crypto.subtle);
       crypto.subtle.digest = (algorithm, data) => new Promise<void>(resolve => {

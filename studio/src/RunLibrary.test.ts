@@ -25,16 +25,16 @@ describe("original-only restore preview", () => {
   it("uses exact-byte identity and distinguishes included from preserved attachments", async () => {
     const source = '{ "apiVersion": "nostekon/v1alpha1", "kind": "DrillRun", "metadata": {"name":"original"} }\n';
     const id = "a9d4cc00fbf2850d3ef94eea3f9b086eb9a9f9b8aedff26999f4db50c2e359bf";
-    const existing = { ...saved(id, "Cached name", 10), source, attestation: "{}" };
+    const existing = { ...saved(id, "Cached name", 10), source, attestation: "{}", backupPreflight: "{}" };
     expect(await previewRunRestore([{ source, backupPlan: "{}" }], [existing])).toEqual([
-      { id, name: "original", existing: true, attestation: "preserved", backupPlan: "included" },
+      { id, name: "original", existing: true, attestation: "preserved", backupPlan: "included", backupPreflight: "preserved" },
     ]);
     expect(existing.attestation).toBe("{}");
   });
 
   it("previews new originals without evaluating or inventing trust", async () => {
     const [preview] = await previewRunRestore([{ source: '{ "original": true }' }], []);
-    expect(preview).toEqual({ id: expect.stringMatching(/^[a-f0-9]{64}$/), name: "Unnamed original", existing: false, attestation: "none", backupPlan: "none" });
+    expect(preview).toEqual({ id: expect.stringMatching(/^[a-f0-9]{64}$/), name: "Unnamed original", existing: false, attestation: "none", backupPlan: "none", backupPreflight: "none" });
     expect(preview).not.toHaveProperty("report");
     expect(preview).not.toHaveProperty("trusted");
   });
@@ -77,7 +77,7 @@ describe("run comparison boundaries", () => {
 
 describe("saved-run history filters", () => {
   const plain = saved("plain", "Inventory review", 10);
-  const planned = { ...saved("planned", "Orders review", 20), backupPlan: "{}", report: { ...saved("planned", "Orders review", 20).report, scenario: "postgresql", drill: "restore-orders" } };
+  const planned = { ...saved("planned", "Orders review", 20), backupPlan: "{}", backupPreflight: "{}", report: { ...saved("planned", "Orders review", 20).report, scenario: "postgresql", drill: "restore-orders" } };
   const attested = { ...saved("attested", "Orders signed", 30), attestation: "{}", report: { ...saved("attested", "Orders signed", 30).report, verdict: "verified" as const } };
   const runs = [plain, planned, attested];
 
@@ -89,6 +89,7 @@ describe("saved-run history filters", () => {
 
   it("combines verdict and attachment presence without granting trust", () => {
     expect(filterRuns(runs, { query: "", verdict: "all", attachment: "plan" }).map(run => run.id)).toEqual(["planned"]);
+    expect(filterRuns(runs, { query: "", verdict: "all", attachment: "preflight" }).map(run => run.id)).toEqual(["planned"]);
     expect(filterRuns(runs, { query: "", verdict: "failed", attachment: "attestation" })).toEqual([]);
     expect(filterRuns(runs, { query: "", verdict: "all", attachment: "none" }).map(run => run.id)).toEqual(["plain"]);
     expect(attested.report.provenance).toBeUndefined();

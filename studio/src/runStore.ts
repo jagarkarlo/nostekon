@@ -10,6 +10,7 @@ export interface SavedRun {
   source: string;
   attestation?: string;
   backupPlan?: string;
+  backupPreflight?: string;
   report: Report;
   sampleId: string;
   savedAt: number;
@@ -100,27 +101,29 @@ export async function listRuns(): Promise<SavedRun[]> {
     for (const run of runs) {
       validateAttachment(run.attestation, "attestation");
       validateAttachment(run.backupPlan, "backup plan");
+      validateAttachment(run.backupPreflight, "backup preflight");
     }
     return runs.sort((left, right) => right.savedAt - left.savedAt);
   } finally { db.close(); }
 }
 
-export async function saveRun(source: string, report: Report, sampleId = "", attestation?: string, backupPlan?: string): Promise<SavedRun> {
-  return (await saveRuns([{ source, report, sampleId, attestation, backupPlan }]))[0];
+export async function saveRun(source: string, report: Report, sampleId = "", attestation?: string, backupPlan?: string, backupPreflight?: string): Promise<SavedRun> {
+  return (await saveRuns([{ source, report, sampleId, attestation, backupPlan, backupPreflight }]))[0];
 }
 
-export async function saveRuns(inputs: readonly { source: string; report: Report; sampleId?: string; attestation?: string; backupPlan?: string }[]): Promise<SavedRun[]> {
+export async function saveRuns(inputs: readonly { source: string; report: Report; sampleId?: string; attestation?: string; backupPlan?: string; backupPreflight?: string }[]): Promise<SavedRun[]> {
   if (!inputs.length) return [];
   const runs: SavedRun[] = [];
   const savedAt = Date.now();
-  for (const { source, report, sampleId = "", attestation, backupPlan } of inputs) {
+  for (const { source, report, sampleId = "", attestation, backupPlan, backupPreflight } of inputs) {
     validateAttachment(attestation, "attestation");
     validateAttachment(backupPlan, "backup plan");
+    validateAttachment(backupPreflight, "backup preflight");
     const bytes = new TextEncoder().encode(source);
     if (bytes.length > SOURCE_LIMIT) throw new Error("Evidence exceeds the 16 MiB limit.");
     const digest = await crypto.subtle.digest("SHA-256", bytes);
     const id = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-    runs.push({ id, source, report, sampleId, savedAt, ...(attestation === undefined ? {} : { attestation }), ...(backupPlan === undefined ? {} : { backupPlan }) });
+    runs.push({ id, source, report, sampleId, savedAt, ...(attestation === undefined ? {} : { attestation }), ...(backupPlan === undefined ? {} : { backupPlan }), ...(backupPreflight === undefined ? {} : { backupPreflight }) });
   }
   const db = await database();
   try {
@@ -133,10 +136,10 @@ export async function saveRuns(inputs: readonly { source: string; report: Report
           if (count >= RUN_LIMIT) throw new Error(`The library holds ${RUN_LIMIT} runs. Delete a run before saving another.`);
           count++;
         }
-        for (const field of ["attestation", "backupPlan"] as const) {
+        for (const field of ["attestation", "backupPlan", "backupPreflight"] as const) {
           const attached = existing?.[field];
           if (run[field] === undefined && attached !== undefined) {
-            validateAttachment(attached, field === "attestation" ? "attestation" : "backup plan");
+            validateAttachment(attached, field === "attestation" ? "attestation" : field === "backupPlan" ? "backup plan" : "backup preflight");
             run[field] = attached;
           }
         }

@@ -11,9 +11,8 @@ function download(name: string, content: BlobPart, type: string) {
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
-export function BackupWorkbench({ evidence, onImport, plan, onPlanChange }: { evidence: string; onImport: (source: string) => void; plan: { text: string; name: string }; onPlanChange: (plan: { text: string; name: string }) => void }) {
+export function BackupWorkbench({ evidence, onImport, plan, onPlanChange, preflight, onPreflightChange }: { evidence: string; onImport: (source: string) => void; plan: { text: string; name: string }; onPlanChange: (plan: { text: string; name: string }) => void; preflight: { text: string; name: string }; onPreflightChange: (preflight: { text: string; name: string }) => void }) {
   const [result, setResult] = useState<{ plan: string; evidence: string; review: BackupReview } | null>(null);
-  const [preflight, setPreflight] = useState({ text: "", name: "" });
   const [preflightResult, setPreflightResult] = useState<{ plan: string; preflight: string; review: PreflightReview } | null>(null);
   const [busy, setBusy] = useState(false);
   const [preflightBusy, setPreflightBusy] = useState(false);
@@ -45,7 +44,6 @@ export function BackupWorkbench({ evidence, onImport, plan, onPlanChange }: { ev
     const current = ++preflightGeneration.current;
     setPreflightResult(null); setPreflightBusy(false);
     if (!plan.text) {
-      setPreflight({ text: "", name: "" });
       setPreflightError("");
       return;
     }
@@ -76,9 +74,9 @@ export function BackupWorkbench({ evidence, onImport, plan, onPlanChange }: { ev
     setPreflightResult(null); setPreflightError(""); setPreflightBusy(true);
     try {
       const text = await readOriginalJSON(file, MAX_PLAN_BYTES);
-      if (current === preflightGeneration.current) setPreflight({ text, name: file.name });
+      if (current === preflightGeneration.current) onPreflightChange({ text, name: file.name });
     } catch (reason) {
-      if (current === preflightGeneration.current) { setPreflight({ text: "", name: "" }); setPreflightError(message(reason)); }
+      if (current === preflightGeneration.current) { onPreflightChange({ text: "", name: "" }); setPreflightError(message(reason)); }
     } finally { if (current === preflightGeneration.current) setPreflightBusy(false); }
   }
 
@@ -144,7 +142,7 @@ export function BackupWorkbench({ evidence, onImport, plan, onPlanChange }: { ev
           <button className="tool" type="button" disabled={!plan.text || preflightBusy} onClick={() => preflightInput.current?.click()}><Upload size={15} />{preflight.text ? "Replace preflight" : "Attach preflight"}</button>
           <button className="icon-button" type="button" disabled={!preflight.text || preflightBusy} title="Download original backup preflight" aria-label="Download original backup preflight" onClick={() => download("nostekon.backup-preflight.json", preflight.text, "application/json")}><Download size={15} /></button>
           <button className="icon-button" type="button" disabled={!freshPreflight || preflightBusy} title="Download preflight review" aria-label="Download preflight review" onClick={() => freshPreflight && download("nostekon.preflight-review.json", JSON.stringify(freshPreflight, null, 2) + "\n", "application/json")}><Download size={15} /></button>
-          <button className="icon-button" type="button" disabled={!preflight.text || preflightBusy} title="Remove backup preflight" aria-label="Remove backup preflight" onClick={() => { setPreflightError(""); setPreflight({ text: "", name: "" }); }}><Trash2 size={15} /></button>
+          <button className="icon-button" type="button" disabled={!preflight.text || preflightBusy} title="Remove backup preflight" aria-label="Remove backup preflight" onClick={() => { setPreflightError(""); onPreflightChange({ text: "", name: "" }); }}><Trash2 size={15} /></button>
         </div>
       </div>
       <input hidden ref={preflightInput} type="file" accept=".json,application/json" data-testid="backup-preflight-input" disabled={!plan.text || preflightBusy} onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void attachPreflight(file); }} />

@@ -154,14 +154,15 @@ host and port. Use the same address after restarting. Changing ports does not
 automatically migrate that library.
 
 In Runs, **Back up saved runs** exports `nostekon-runs.backup.json`: exact evidence
-and optional attestation sidecars and restore plans, each with its own SHA-256.
+and optional attestation sidecars, restore plans and host preflight originals,
+each with its own SHA-256.
 To export a subset, select the required rows and use **Back up selected runs**.
 **Visible runs** selects the current filtered results; changing filters does not
 discard an existing selection. Clear the selection before choosing a different
 subset. The exported backup contains originals, not comparison results or trust.
-Backups containing plans use `nostekon/run-backup/v2alpha1`; plan-free exports
-retain `v1alpha1`, and restore accepts both versions. Attached plans are bounded
-to 16 KiB each. **Restore run backup**
+Backups containing preflights use `nostekon/run-backup/v3alpha1`, plan-only exports
+use `v2alpha1`, and plan-free exports retain `v1alpha1`; restore accepts all
+three versions. Attached plans and preflights are bounded to 16 KiB each. **Restore run backup**
 validates hashes and previews new versus already-saved identities, including
 whether attachments are supplied or preserved. Cancel leaves the library
 unchanged. After confirmation, it evaluates every run, then saves the
@@ -170,12 +171,12 @@ not partially replace the library. Existing evidence identities can be updated;
 other runs are not deleted. Backups are bounded to 64 MiB and 50 runs.
 
 Reports, sample labels, public keys, verification receipts and trust are not
-backed up; cached plan-review verdicts are not exported either. Reopening a run
-with an attached plan calculates a fresh review. Restored evidence is Imported,
+backed up; cached plan-review or preflight-review verdicts are not exported either. Reopening a run
+with an attached plan or preflight calculates a fresh review. Restored evidence is Imported,
 even if originally an example.
 Re-import authenticated public keys separately and make a fresh signature check.
-Backup updates without a sidecar or plan preserve the corresponding existing
-attachment. To remove a plan, reopen the run, remove it and explicitly save.
+Backup updates without a sidecar, plan or preflight preserve the corresponding existing
+attachment. To remove a plan or preflight, reopen the run, remove it and explicitly save.
 Saved suites and host-job
 history are separate; export their original files with existing controls. A run
 backup is not Import bundle or Import signed archive. Protect sensitive backups.

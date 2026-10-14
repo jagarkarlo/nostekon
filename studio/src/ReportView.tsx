@@ -40,7 +40,7 @@ function download(name: string, text: string, type: string) {
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
-export function ReportView({ onReachability, selection }: { onReachability: (online: boolean) => void; selection?: { source: string; sampleId: string; attestation?: string; backupPlan?: string } }) {
+export function ReportView({ onReachability, selection }: { onReachability: (online: boolean) => void; selection?: { source: string; sampleId: string; attestation?: string; backupPlan?: string; backupPreflight?: string } }) {
   const [source, setSource] = useState("");
   const [sampleId, setSampleId] = useState("");
   const [sourceError, setSourceError] = useState("");
@@ -56,6 +56,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
   const generation = useRef(0);
   const saveRevision = useRef(0);
   const [backupPlan, setBackupPlan] = useState({ text: "", name: "" });
+  const [backupPreflight, setBackupPreflight] = useState({ text: "", name: "" });
   const editorRef = useRef<CodeEditorHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attestation, setAttestation] = useState("");
@@ -116,6 +117,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
         setAttestation("");
         setAttestationName("");
         setBackupPlan({ text: "", name: "" });
+        setBackupPreflight({ text: "", name: "" });
         await build(text, current);
       } catch (error) { if (current === generation.current) setSourceError(String(error)); }
     },
@@ -125,6 +127,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
   useEffect(() => {
     if (selection) {
       setBackupPlan({ text: selection.backupPlan ?? "", name: selection.backupPlan ? "Saved original restore plan" : "" });
+      setBackupPreflight({ text: selection.backupPreflight ?? "", name: selection.backupPreflight ? "Saved original backup preflight" : "" });
       setAttestation(selection.attestation ?? "");
       setAttestationName(selection.attestation ? "Saved original attestation" : "");
       setSource(selection.source);
@@ -164,7 +167,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
     if (!report || stale) return;
     setSaving(true);
     const current = saveRevision.current;
-    try { await saveRun(builtFrom, report, sampleId, attestation, backupPlan.text); if (current === saveRevision.current) { setSaved(true); setSourceError(""); } }
+    try { await saveRun(builtFrom, report, sampleId, attestation, backupPlan.text, backupPreflight.text); if (current === saveRevision.current) { setSaved(true); setSourceError(""); } }
     catch (error) { setSourceError(error instanceof Error ? error.message : "Browser storage is unavailable."); }
     finally { setSaving(false); }
   }
@@ -175,7 +178,7 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
     setImportingArchive(true); setIsBuilding(false);
     setSource(""); setReport(null); setBuiltFrom(""); setSampleId("");
     setAttestation(""); setAttestationName(""); setImportedKey(undefined);
-    setBackupPlan({ text: "", name: "" }); saveRevision.current++;
+    setBackupPlan({ text: "", name: "" }); setBackupPreflight({ text: "", name: "" }); saveRevision.current++;
     setArchiveResult(""); setSourceError(""); setRequestError(""); setProblems([]); setSaved(false);
     try {
       if (file.size > MAX_SIGNED_ARCHIVE_BYTES) throw new Error("Signed archive exceeds the 17 MiB limit.");
@@ -336,8 +339,8 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
         {sourceError && <div className="banner bad" role="alert"><XCircle size={15} /> {sourceError}</div>}
 
         <div hidden={tab !== "plan"}>
-          <BackupWorkbench evidence={source} plan={backupPlan} onPlanChange={plan => { saveRevision.current++; setBackupPlan(plan); setSaved(false); }} onImport={text => {
-            setSource(text); setSampleId(""); setSourceError(""); setAttestation(""); setAttestationName(""); setArchiveResult(""); setImportedKey(undefined);
+          <BackupWorkbench evidence={source} plan={backupPlan} preflight={backupPreflight} onPlanChange={plan => { saveRevision.current++; setBackupPlan(plan); if (!plan.text) setBackupPreflight({ text: "", name: "" }); setSaved(false); }} onPreflightChange={preflight => { saveRevision.current++; setBackupPreflight(preflight); setSaved(false); }} onImport={text => {
+            setSource(text); setSampleId(""); setSourceError(""); setAttestation(""); setAttestationName(""); setArchiveResult(""); setImportedKey(undefined); setBackupPreflight({ text: "", name: "" });
             void build(text, undefined, "", false);
           }} />
         </div>

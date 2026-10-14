@@ -3,9 +3,9 @@ import type { Report } from "./report";
 import type { OriginalRun } from "./runBackup";
 
 export type HistorySort = "newest" | "oldest" | "name";
-export type AttachmentFilter = "all" | "plan" | "attestation" | "none";
+export type AttachmentFilter = "all" | "plan" | "preflight" | "attestation" | "none";
 type AttachmentState = "included" | "preserved" | "none";
-export interface RestorePreview { id: string; name: string; existing: boolean; attestation: AttachmentState; backupPlan: AttachmentState }
+export interface RestorePreview { id: string; name: string; existing: boolean; attestation: AttachmentState; backupPlan: AttachmentState; backupPreflight: AttachmentState }
 
 export async function previewRunRestore(originals: readonly OriginalRun[], saved: readonly SavedRun[]): Promise<RestorePreview[]> {
   const available = new Map(saved.map(run => [run.id, run]));
@@ -16,8 +16,8 @@ export async function previewRunRestore(originals: readonly OriginalRun[], saved
     const existing = available.get(id);
     const value = JSON.parse(original.source) as { metadata?: { name?: unknown } };
     const name = typeof value.metadata?.name === "string" && value.metadata.name.trim() ? value.metadata.name.slice(0, 160) : "Unnamed original";
-    const state = (field: "attestation" | "backupPlan"): AttachmentState => original[field] ? "included" : existing?.[field] ? "preserved" : "none";
-    previews.push({ id, name, existing: !!existing, attestation: state("attestation"), backupPlan: state("backupPlan") });
+    const state = (field: "attestation" | "backupPlan" | "backupPreflight"): AttachmentState => original[field] ? "included" : existing?.[field] ? "preserved" : "none";
+    previews.push({ id, name, existing: !!existing, attestation: state("attestation"), backupPlan: state("backupPlan"), backupPreflight: state("backupPreflight") });
   }
   return previews;
 }
@@ -49,7 +49,9 @@ export function filterRuns(runs: readonly SavedRun[], filters: { query: string; 
   return runs.filter(run => {
     const text = `${run.report.name} ${run.report.scenario ?? ""} ${run.report.drill ?? ""}`.toLowerCase();
     const attached = filters.attachment === "all" || (filters.attachment === "plan" ? !!run.backupPlan
-      : filters.attachment === "attestation" ? !!run.attestation : !run.backupPlan && !run.attestation);
+      : filters.attachment === "preflight" ? !!run.backupPreflight
+      : filters.attachment === "attestation" ? !!run.attestation
+      : !run.backupPlan && !run.backupPreflight && !run.attestation);
     return attached && (filters.verdict === "all" || run.report.verdict === filters.verdict) && terms.every(term => text.includes(term));
   });
 }
