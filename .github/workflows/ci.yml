@@ -91,7 +91,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -144,7 +144,7 @@ jobs:
       - name: Verify public package sources
         run: |
           node -e 'const lock = require("./package-lock.json"); const invalid = Object.values(lock.packages).filter(pkg => pkg.resolved && new URL(pkg.resolved).origin !== "https://registry.npmjs.org"); if (invalid.length) { console.error(`${invalid.length} packages use a non-public registry`); process.exit(1); }'
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -189,7 +189,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -e '..[docs]'
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
