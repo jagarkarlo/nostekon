@@ -8,6 +8,8 @@ import { samples } from "./samples";
 import { request } from "./api";
 import { createRunBackup, MAX_RUN_BACKUP_BYTES, readRunBackup } from "./runBackup";
 import type { OriginalRun } from "./runBackup";
+import { sortRuns } from "./runHistory";
+import type { HistorySort } from "./runHistory";
 
 export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: string, attestation?: string, backupPlan?: string) => void }) {
   const [runs, setRuns] = useState<SavedRun[]>([]);
@@ -15,6 +17,7 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  const [sort, setSort] = useState<HistorySort>("newest");
   const [exampleFilter, setExampleFilter] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [compare, setCompare] = useState(false);
@@ -95,8 +98,8 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
     finally { setDeleting(false); }
   }
 
-  const matching = runs.filter((run) => (filter === "all" || run.report.verdict === filter) &&
-    `${run.report.name} ${run.report.scenario ?? ""}`.toLowerCase().includes(search.toLowerCase()));
+  const matching = sortRuns(runs.filter((run) => (filter === "all" || run.report.verdict === filter) &&
+    `${run.report.name} ${run.report.scenario ?? ""}`.toLowerCase().includes(search.toLowerCase())), sort);
   const compared = selected.map((id) => runs.find((run) => run.id === id)).filter((run): run is SavedRun => !!run);
   const exampleCounts = { all: samples.length, recorded: samples.filter(sample => sample.recorded).length, synthetic: samples.filter(sample => !sample.recorded).length };
   const visibleExamples = samples.filter(sample => exampleFilter === "all" || sample.recorded === (exampleFilter === "recorded"));
@@ -139,6 +142,9 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
         <select aria-label="Filter verdict" value={filter} onChange={(event) => setFilter(event.target.value)}>
           <option value="all">All verdicts</option><option value="verified">Verified</option><option value="failed">Failed</option><option value="incomplete">Incomplete</option>
         </select>
+        <select aria-label="Sort saved runs" value={sort} onChange={event => setSort(event.target.value as HistorySort)}>
+          <option value="newest">Newest saved</option><option value="oldest">Oldest saved</option><option value="name">Run name</option>
+        </select>
         <button type="button" className="tool compare-action" disabled={selected.length !== 2} onClick={() => setCompare(!compare)}><GitCompareArrows size={15} /> {compare ? "Close comparison" : `Compare (${selected.length}/2)`}</button>
         </>}
       </div>
@@ -149,7 +155,7 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
         <thead><tr><th aria-label="Comparison selection" /><th>Run</th><th>Evidence</th><th>Verdict</th><th>Depth</th><th>Recovery time</th><th>Data loss</th><th aria-label="Actions" /></tr></thead>
         <tbody>{matching.map((run) => <tr key={run.id}>
           <td><input type="checkbox" aria-label={`Compare ${run.report.name}`} checked={selected.includes(run.id)} disabled={selected.length === 2 && !selected.includes(run.id)} onChange={(event) => { setCompare(false); setSelected(event.target.checked ? [...selected, run.id] : selected.filter((id) => id !== run.id)); }} /></td>
-          <td><button type="button" className="run-name" onClick={() => onOpen(run.source, run.sampleId, run.attestation, run.backupPlan)}>{run.report.name}</button><small>{run.report.scenario ?? "Unspecified scenario"}</small></td>
+          <td><button type="button" className="run-name" onClick={() => onOpen(run.source, run.sampleId, run.attestation, run.backupPlan)}>{run.report.name}</button><small>{run.report.scenario ?? "Unspecified scenario"}</small><small>{Number.isFinite(new Date(run.savedAt).getTime()) ? <>Saved <time dateTime={new Date(run.savedAt).toISOString()}>{new Date(run.savedAt).toLocaleString()}</time></> : "Saved time unavailable"}</small></td>
           <td data-label="Evidence"><span className="evidence-kind">{evidenceLabel(run.sampleId)}</span>{run.attestation && <small className="attachment-label"><Paperclip size={13} aria-hidden="true" /> Attestation attached</small>}{run.backupPlan && <small className="attachment-label"><FileJson size={13} aria-hidden="true" /> Restore plan attached</small>}</td>
           <td data-label="Verdict"><span className={`verdict-tag ${run.report.verdict}`}>{run.report.verdict}</span></td>
           <td data-label="Depth" className="mono">{run.report.deepestPassed ?? "None"}</td>
