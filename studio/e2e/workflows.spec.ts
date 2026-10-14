@@ -29,8 +29,11 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto("/");
     expect(await page.locator(".hero h1").evaluate(element => getComputedStyle(element).animationName)).toBe("product-arrive");
+    expect(await page.locator(".signal-dot").evaluate(element => getComputedStyle(element).animationName)).toBe("signal-pulse");
+    expect(await page.locator(".hero-pipeline li").first().evaluate(element => getComputedStyle(element).animationName)).toBe("pipeline-sweep");
     await expect(page.getByRole("tab", { name: "Policy suite", exact: true })).toHaveAttribute("aria-selected", "true");
     await page.getByRole("tab", { name: "Restore report", exact: true }).click();
+    await expect(page.locator("[data-showcase]")).toHaveAttribute("data-paused", "true");
     await expect(page.getByRole("tabpanel")).toContainText("V3");
     await page.getByRole("tab", { name: "Failed recovery", exact: true }).click();
     await expect(page.getByRole("tabpanel")).toContainText("Synthetic");
@@ -64,6 +67,7 @@ for (const width of [390, 1440]) {
     await page.getByRole("navigation", { name: "Main navigation", exact: true }).getByRole("link", { name: "Product", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Nostekon", exact: true })).toBeVisible();
     expect(await page.locator(".page-title h1").evaluate(element => getComputedStyle(element).animationName)).toBe("none");
+    expect(await page.locator(".flow-track li").first().evaluate(element => getComputedStyle(element, "::before").animationName)).toBe("none");
     await page.getByRole("tab", { name: "Restore report", exact: true }).click();
     await expect(page.getByRole("tabpanel")).toBeVisible();
     await page.getByRole("navigation", { name: "Main navigation", exact: true }).getByRole("link", { name: "Overview", exact: true }).click();

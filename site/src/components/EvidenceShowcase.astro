@@ -26,12 +26,26 @@ const previews = [
       showcase.dataset.ready = "true";
       const tabs = Array.from(showcase.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
       const panels = Array.from(showcase.querySelectorAll<HTMLElement>('[role="tabpanel"]'));
+      const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+      let activeIndex = 0;
+      let paused = false;
+      let timer: number | undefined;
       const select = (index: number) => {
+        activeIndex = index;
         tabs.forEach((tab, position) => { tab.setAttribute("aria-selected", String(position === index)); tab.tabIndex = position === index ? 0 : -1; });
         panels.forEach((panel, position) => { panel.hidden = position !== index; });
       };
+      const schedule = () => {
+        window.clearTimeout(timer);
+        if (paused || reducedMotion.matches) return;
+        timer = window.setTimeout(() => {
+          select((activeIndex + 1) % tabs.length);
+          schedule();
+        }, 7000);
+      };
+      const pause = () => { paused = true; showcase.dataset.paused = "true"; window.clearTimeout(timer); };
       tabs.forEach((tab, index) => {
-        tab.addEventListener("click", () => select(index));
+        tab.addEventListener("click", () => { pause(); select(index); });
         tab.addEventListener("keydown", event => {
           let next = index;
           if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
@@ -39,9 +53,14 @@ const previews = [
           else if (event.key === "Home") next = 0;
           else if (event.key === "End") next = tabs.length - 1;
           else return;
-          event.preventDefault(); select(next); tabs[next].focus();
+          event.preventDefault(); pause(); select(next); tabs[next].focus();
         });
       });
+      showcase.addEventListener("pointerenter", () => { showcase.dataset.paused = "true"; window.clearTimeout(timer); });
+      showcase.addEventListener("pointerleave", () => { if (!paused) { delete showcase.dataset.paused; schedule(); } });
+      showcase.addEventListener("focusin", () => { showcase.dataset.paused = "true"; window.clearTimeout(timer); });
+      showcase.addEventListener("focusout", () => { if (!paused && !showcase.contains(document.activeElement)) { delete showcase.dataset.paused; schedule(); } });
+      schedule();
     }
   }
   initializeShowcases();
