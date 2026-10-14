@@ -155,10 +155,16 @@ automatically migrate that library.
 
 In Runs, **Back up saved runs** exports `nostekon-runs.backup.json`: exact evidence
 and optional attestation sidecars and restore plans, each with its own SHA-256.
+To export a subset, select the required rows and use **Back up selected runs**.
+**Visible runs** selects the current filtered results; changing filters does not
+discard an existing selection. Clear the selection before choosing a different
+subset. The exported backup contains originals, not comparison results or trust.
 Backups containing plans use `nostekon/run-backup/v2alpha1`; plan-free exports
 retain `v1alpha1`, and restore accepts both versions. Attached plans are bounded
 to 16 KiB each. **Restore run backup**
-validates hashes, asks for confirmation, evaluates every run, then saves the
+validates hashes and previews new versus already-saved identities, including
+whether attachments are supplied or preserved. Cancel leaves the library
+unchanged. After confirmation, it evaluates every run, then saves the
 batch atomically. Invalid input, failed evaluation and quota/capacity failures do
 not partially replace the library. Existing evidence identities can be updated;
 other runs are not deleted. Backups are bounded to 64 MiB and 50 runs.
@@ -173,6 +179,14 @@ attachment. To remove a plan, reopen the run, remove it and explicitly save.
 Saved suites and host-job
 history are separate; export their original files with existing controls. A run
 backup is not Import bundle or Import signed archive. Protect sensitive backups.
+
+Saved history can be ordered by newest save, oldest save or run name. Search
+matches each term across the run name, scenario and drill; attachment filters
+only describe presence, not signature validity. Compare exactly two selected
+runs: the first is the baseline, and the direction can be swapped. Missing
+measurements remain unmeasured, while differing scenarios, requested depths or
+objectives are disclosed separately. Saved timestamps describe browser saves,
+not authenticated capture times.
 
 ## Troubleshoot safely
 

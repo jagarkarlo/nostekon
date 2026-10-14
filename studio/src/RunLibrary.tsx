@@ -8,8 +8,8 @@ import { samples } from "./samples";
 import { request } from "./api";
 import { createRunBackup, MAX_RUN_BACKUP_BYTES, readRunBackup } from "./runBackup";
 import type { OriginalRun } from "./runBackup";
-import { comparisonWarnings, filterRuns, selectedRuns, sortRuns } from "./runHistory";
-import type { AttachmentFilter, HistorySort } from "./runHistory";
+import { comparisonWarnings, filterRuns, previewRunRestore, selectedRuns, sortRuns } from "./runHistory";
+import type { AttachmentFilter, HistorySort, RestorePreview } from "./runHistory";
 
 export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: string, attestation?: string, backupPlan?: string) => void }) {
   const [runs, setRuns] = useState<SavedRun[]>([]);
@@ -27,6 +27,7 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupResult, setBackupResult] = useState("");
   const [pendingRestore, setPendingRestore] = useState<OriginalRun[]>();
+  const [restorePreview, setRestorePreview] = useState<RestorePreview[]>([]);
   const backupInput = useRef<HTMLInputElement>(null);
   const restoreDialog = useRef<HTMLDialogElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -61,9 +62,12 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
 
   async function inspectBackup(file: File) {
     setBackupBusy(true); setError(""); setBackupResult(""); setPendingRestore(undefined);
+    setRestorePreview([]);
     try {
       if (file.size > MAX_RUN_BACKUP_BYTES) throw new Error("Run backup exceeds the 64 MiB limit.");
-      setPendingRestore(await readRunBackup(await file.text()));
+      const originals = await readRunBackup(await file.text());
+      setRestorePreview(await previewRunRestore(originals, await listRuns()));
+      setPendingRestore(originals);
     } catch (reason) { setError(message(reason)); }
     finally { setBackupBusy(false); }
   }
@@ -187,6 +191,8 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
     <dialog ref={restoreDialog} className="delete-dialog" aria-labelledby="restore-title" onCancel={event => { if (backupBusy) event.preventDefault(); else setPendingRestore(undefined); }}>
       <h2 id="restore-title">Restore {pendingRestore?.length ?? 0} saved runs?</h2>
       <p>Existing copies with matching evidence may be updated. Keys and trust settings are not part of this backup.</p>
+      <p role="status" aria-label="Restore preview totals">{restorePreview.filter(run => !run.existing).length} new, {restorePreview.filter(run => run.existing).length} already saved. Reports will be freshly evaluated.</p>
+      <ul className="restore-preview" aria-label="Incoming run originals">{restorePreview.map(run => <li key={run.id}><strong>{run.name}</strong><span>{run.existing ? "Existing original" : "New original"} <code>{run.id.slice(0, 12)}</code></span><span>Attestation: {run.attestation}; restore plan: {run.backupPlan}</span></li>)}</ul>
       <div className="library-actions"><button type="button" className="tool" disabled={backupBusy} onClick={() => setPendingRestore(undefined)}>Cancel restore</button><button type="button" className="primary" disabled={backupBusy} onClick={() => void restoreBackup()}><ArchiveRestore size={15} /> {backupBusy ? "Evaluating..." : "Confirm restore"}</button></div>
     </dialog>
     <dialog ref={dialog} className="delete-dialog" onCancel={() => setPendingDelete(null)}>

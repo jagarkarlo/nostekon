@@ -1,8 +1,26 @@
 import type { SavedRun } from "./runStore";
 import type { Report } from "./report";
+import type { OriginalRun } from "./runBackup";
 
 export type HistorySort = "newest" | "oldest" | "name";
 export type AttachmentFilter = "all" | "plan" | "attestation" | "none";
+type AttachmentState = "included" | "preserved" | "none";
+export interface RestorePreview { id: string; name: string; existing: boolean; attestation: AttachmentState; backupPlan: AttachmentState }
+
+export async function previewRunRestore(originals: readonly OriginalRun[], saved: readonly SavedRun[]): Promise<RestorePreview[]> {
+  const available = new Map(saved.map(run => [run.id, run]));
+  const previews: RestorePreview[] = [];
+  for (const original of originals) {
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(original.source));
+    const id = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
+    const existing = available.get(id);
+    const value = JSON.parse(original.source) as { metadata?: { name?: unknown } };
+    const name = typeof value.metadata?.name === "string" && value.metadata.name.trim() ? value.metadata.name.slice(0, 160) : "Unnamed original";
+    const state = (field: "attestation" | "backupPlan"): AttachmentState => original[field] ? "included" : existing?.[field] ? "preserved" : "none";
+    previews.push({ id, name, existing: !!existing, attestation: state("attestation"), backupPlan: state("backupPlan") });
+  }
+  return previews;
+}
 
 export function selectedRuns(runs: readonly SavedRun[], identities: readonly string[]): SavedRun[] {
   if (!identities.length) throw new Error("Select at least one saved run.");

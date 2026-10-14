@@ -93,7 +93,7 @@ for (const width of [390, 1440]) {
     await expect(page.getByRole("heading", { name: "Validation profiles", exact: true })).toBeVisible();
   });
 
-  test(`saved history sorting filters comparison and selected originals at ${width}px`, async ({ page }) => {
+  test(`saved history sorting filters comparison and selected originals at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
     const template = JSON.parse(await readFile(new URL("../../examples/runs/k3d-postgresql.run.json", import.meta.url), "utf8"));
     const originals = new Map<string, string>();
@@ -137,13 +137,40 @@ for (const width of [390, 1440]) {
     await page.getByRole("button", { name: "Back up selected runs" }).click();
     const download = await downloading;
     expect(download.suggestedFilename()).toBe("nostekon-selected-runs.backup.json");
-    const backup = JSON.parse(await readFile((await download.path())!, "utf8"));
+    const backupText = await readFile((await download.path())!, "utf8");
+    const backup = JSON.parse(backupText);
     expect(backup.runs.map((run: { evidence: string }) => run.evidence)).toEqual([originals.get("history-zulu"), originals.get("history-alpha")]);
     expect(backup.trustedKeys).toBeUndefined();
     for (const run of backup.runs) expect(run.report).toBeUndefined();
     await page.getByRole("button", { name: "Clear selected runs" }).click();
     await expect(page.getByRole("region", { name: "Run comparison" })).toHaveCount(0);
+    const backupInput = page.getByTestId("run-backup-input");
+    await backupInput.setInputFiles({ name: "selected.backup.json", mimeType: "application/json", buffer: Buffer.from(backupText) });
+    let restore = page.getByRole("dialog", { name: "Restore 2 saved runs?" });
+    await expect(restore.getByRole("status", { name: "Restore preview totals" })).toContainText("0 new, 2 already saved");
+    await expect(restore.getByRole("list", { name: "Incoming run originals" }).getByRole("listitem")).toHaveCount(2);
+    await page.getByRole("button", { name: "Cancel restore", exact: true }).click();
+    await expect(restore).toBeHidden();
+    await expect(rows).toHaveCount(3);
+    await page.getByRole("button", { name: "Delete history-zulu", exact: true }).click();
+    await page.getByRole("button", { name: "Delete run", exact: true }).click();
+    await expect(rows).toHaveCount(2);
+    await backupInput.setInputFiles({ name: "selected.backup.json", mimeType: "application/json", buffer: Buffer.from(backupText) });
+    restore = page.getByRole("dialog", { name: "Restore 2 saved runs?" });
+    await expect(restore.getByRole("status", { name: "Restore preview totals" })).toContainText("1 new, 1 already saved");
+    const bounds = await restore.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: testInfo.outputPath(`history-restore-${width}.png`) });
+    await page.getByRole("button", { name: "Confirm restore", exact: true }).click();
+    await expect(page.getByRole("status", { name: "Run backup restore result" })).toContainText("2 runs restored");
+    await expect(rows).toHaveCount(3);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.evaluate(() => scrollTo(0, 0));
+    await page.screenshot({ path: testInfo.outputPath(`history-${width}.png`), fullPage: true });
+    await page.getByRole("button", { name: /Switch to .* mode/ }).click();
+    await page.evaluate(() => scrollTo(0, 0));
+    await page.screenshot({ path: testInfo.outputPath(`history-alternate-${width}.png`), fullPage: true });
   });
 
   test(`calm workspace and browsable evidence at ${width}px`, async ({ page }) => {
@@ -269,7 +296,7 @@ for (const width of [390, 1440]) {
     await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
     await page.getByRole("link", { name: "Runs", exact: true }).click();
     await page.reload();
-    await expect(page.getByText("Restore plan attached", { exact: true })).toBeVisible();
+    await expect(page.locator(".saved-runs tbody").getByText("Restore plan attached", { exact: true })).toBeVisible();
     const planDownload = page.waitForEvent("download");
     await page.getByRole("button", { name: `Download restore plan for ${name}`, exact: true }).click();
     expect(await readFile((await (await planDownload).path())!)).toEqual(plan);
@@ -317,7 +344,7 @@ for (const width of [390, 1440]) {
     await page.getByRole("link", { name: "Runs", exact: true }).click();
     await page.reload();
     await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
-    await expect(page.getByText("Restore plan attached", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".saved-runs tbody").getByText("Restore plan attached", { exact: true })).toHaveCount(0);
   });
 
   test(`independent backup plan gate and portable originals round-trip at ${width}px`, async ({ page }, testInfo) => {
@@ -636,7 +663,7 @@ for (const width of [390, 1440]) {
       await page.getByRole("button", { name: "Save run", exact: true }).click();
       await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeDisabled();
       await page.goto(reportURL.replace("/report", "/runs"));
-      await expect(page.locator(".saved-runs")).not.toContainText("Attestation attached");
+      await expect(page.locator(".saved-runs tbody")).not.toContainText("Attestation attached");
       await page.locator(".saved-runs .run-name").click();
       await expect(page.getByRole("button", { name: "Attach attestation", exact: true })).toBeVisible();
     } finally { await rm(directory, { recursive: true, force: true }); }

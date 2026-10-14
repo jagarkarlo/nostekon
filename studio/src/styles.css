@@ -447,6 +447,9 @@ button.finding:hover { filter: brightness(1.12); }
 .delete-dialog h2 { margin: 0; font-size: 20px; }
 .delete-dialog p { font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .delete-dialog .library-actions { justify-content: flex-end; }
+.restore-preview { list-style: none; margin: 16px 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.restore-preview li { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+.restore-preview span { color: var(--ink-2); }
 
 .trust-workbench { padding: 16px 0; border-bottom: 1px solid var(--line); }
 .backup-workbench { padding: 20px; min-width: 0; }

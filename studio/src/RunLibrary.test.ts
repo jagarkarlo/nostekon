@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comparisonWarnings, filterRuns, selectedRuns, sortRuns } from "./runHistory";
+import { comparisonWarnings, filterRuns, previewRunRestore, selectedRuns, sortRuns } from "./runHistory";
 import type { SavedRun } from "./runStore";
 
 function saved(id: string, name: string, savedAt: number): SavedRun {
@@ -18,6 +18,25 @@ describe("saved-run history ordering", () => {
     const runs = [saved("b", "Run 10", 10), saved("z", "run 2", 10), saved("a", "Run 2", 10)];
     expect(sortRuns(runs, "name").map(run => run.id)).toEqual(["a", "z", "b"]);
     expect(sortRuns(runs, "newest").map(run => run.id)).toEqual(["a", "b", "z"]);
+  });
+});
+
+describe("original-only restore preview", () => {
+  it("uses exact-byte identity and distinguishes included from preserved attachments", async () => {
+    const source = '{ "apiVersion": "nostekon/v1alpha1", "kind": "DrillRun", "metadata": {"name":"original"} }\n';
+    const id = "a9d4cc00fbf2850d3ef94eea3f9b086eb9a9f9b8aedff26999f4db50c2e359bf";
+    const existing = { ...saved(id, "Cached name", 10), source, attestation: "{}" };
+    expect(await previewRunRestore([{ source, backupPlan: "{}" }], [existing])).toEqual([
+      { id, name: "original", existing: true, attestation: "preserved", backupPlan: "included" },
+    ]);
+    expect(existing.attestation).toBe("{}");
+  });
+
+  it("previews new originals without evaluating or inventing trust", async () => {
+    const [preview] = await previewRunRestore([{ source: '{ "original": true }' }], []);
+    expect(preview).toEqual({ id: expect.stringMatching(/^[a-f0-9]{64}$/), name: "Unnamed original", existing: false, attestation: "none", backupPlan: "none" });
+    expect(preview).not.toHaveProperty("report");
+    expect(preview).not.toHaveProperty("trusted");
   });
 });
 
