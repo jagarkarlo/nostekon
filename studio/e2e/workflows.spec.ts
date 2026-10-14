@@ -1531,7 +1531,7 @@ for (const width of [390, 1440]) {
           return { status: response.status, text: await response.text() };
         }, new URL((await mark.getAttribute("src"))!, page.url()).href);
         expect(asset.status).toBe(200);
-        expect(asset.text).toContain("Nostekon core-vault mark");
+        expect(asset.text).toContain("Nostekon stepping-stones mark");
         if (path !== "/docs/") {
           await expect(mark).toBeVisible();
           const toggle = page.locator("[data-theme-toggle]");
