@@ -40,6 +40,65 @@ func TestValidationProfileMode(t *testing.T) {
 	}
 }
 
+func TestBackupPreflightCLIMode(t *testing.T) {
+	directory := t.TempDir()
+	planPath := "../../studio/e2e/postgresql-semantic-rehearsal.plan.json"
+	preflightPath := filepath.Join(directory, "preflight.json")
+	preflight := `{
+  "apiVersion": "nostekon/backup-preflight/v1alpha1",
+  "kind": "PostgreSQLBackupPreflight",
+  "passed": true,
+  "backupMatches": true,
+  "backup": { "sha256": "6d9a0a2794de72ac5c986ccbfa9487c2d7c6a2e2935b27cb0916bac3bf092c50", "bytes": 3323 },
+  "planSHA256": "988df63edaa9bf7f3f749d22de856f23aec91dfcd167df4e1d5163a8ebb6e7e1",
+  "imageId": "sha256:2698c2096ca78a41ae7477580afb30fe36d5368564511b2ea593dbfb26401fdd",
+  "requestedLevel": "V4",
+  "checks": [
+    { "name": "backup-plan-binding", "passed": true, "detail": "Frozen archive checksum and size match the plan" },
+    { "name": "snapshot-count-coverage", "passed": true, "detail": "At least one table count is declared" },
+    { "name": "local-linux-daemon", "passed": true, "detail": "Local Linux Docker daemon on a supported native architecture" },
+    { "name": "daemon-resource-floor", "passed": true, "detail": "At least 512 MiB and one CPU advertised; free capacity untested" },
+    { "name": "native-pinned-image", "passed": true, "detail": "Exact cached Linux image matches native daemon architecture" }
+  ],
+  "limitations": [
+    "Technical prerequisites only; not approval, sanitization or dedicated-host confirmation",
+    "Header/byte binding only; full archive validity and restore success untested",
+    "No restore ran; capture authenticity, incident RTO and acknowledged-write RPO unmeasured"
+  ]
+}`
+	if err := os.WriteFile(preflightPath, []byte(preflight), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output, problems bytes.Buffer
+	if code := Run([]string{"--backup-plan", planPath, "--backup-preflight", preflightPath}, &output, &problems); code != 0 {
+		t.Fatalf("preflight gate: %d %s", code, problems.String())
+	}
+	var review map[string]any
+	if err := json.Unmarshal(output.Bytes(), &review); err != nil || review["kind"] != "PostgreSQLPreflightReview" || review["passed"] != true {
+		t.Fatalf("unexpected preflight review: %s %v", output.String(), err)
+	}
+	blockedPath := filepath.Join(directory, "blocked.json")
+	blocked := strings.Replace(preflight, `"name": "native-pinned-image", "passed": true`, `"name": "native-pinned-image", "passed": false`, 1)
+	blocked = strings.Replace(blocked, `"passed": true,`, `"passed": false,`, 1)
+	if err := os.WriteFile(blockedPath, []byte(blocked), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if code := Run([]string{"--backup-plan", planPath, "--backup-preflight", blockedPath}, &output, &problems); code != 1 {
+		t.Fatalf("blocked preflight exit=%d %s", code, problems.String())
+	}
+	for _, args := range [][]string{
+		{"--backup-preflight", preflightPath},
+		{"--backup-plan", planPath, "--backup-preflight", "--export-backup-bundle", preflightPath},
+		{"--backup-plan", planPath, "--backup-preflight", "--suite", preflightPath},
+	} {
+		output.Reset()
+		if code := Run(args, &output, &problems); code != 2 || output.Len() != 0 {
+			t.Fatalf("invalid preflight args=%v exit=%d", args, code)
+		}
+	}
+}
+
 func TestBackupPlanModeRejectsConflictingOptions(t *testing.T) {
 	for _, options := range [][]string{
 		{"--suite"}, {"--attestation", "sidecar.json", "--trusted-key", "key.pem"},

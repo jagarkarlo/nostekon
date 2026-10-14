@@ -14,7 +14,7 @@ import (
 )
 
 func registerBackupRoutes(mux *http.ServeMux) {
-	for _, path := range []string{"/api/v1/backups/review", "/api/v1/backups/bundle", "/api/v1/backups/import", "/api/v1/backups/profile"} {
+	for _, path := range []string{"/api/v1/backups/review", "/api/v1/backups/bundle", "/api/v1/backups/import", "/api/v1/backups/profile", "/api/v1/backups/preflight"} {
 		mux.HandleFunc("POST "+path, backupReviewHandler)
 	}
 }
@@ -36,8 +36,11 @@ func backupReviewHandler(writer http.ResponseWriter, request *http.Request) {
 	}
 	limit := int64(2*backupreview.MaxBundleBytes + 1024)
 	profileMode := request.URL.Path == "/api/v1/backups/profile"
+	preflightMode := request.URL.Path == "/api/v1/backups/preflight"
 	if profileMode {
 		limit = 6*backupreview.MaxPlanBytes + 1024
+	} else if preflightMode {
+		limit = 12*backupreview.MaxPlanBytes + 1024
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, limit))
 	if err != nil {
@@ -56,6 +59,8 @@ func backupReviewHandler(writer http.ResponseWriter, request *http.Request) {
 	var fields map[string]json.RawMessage
 	if profileMode {
 		fields, err = backupStringFields(body, "profile")
+	} else if preflightMode {
+		fields, err = backupStringFields(body, "plan", "preflight")
 	} else {
 		fields, err = backupRequestFields(body, request.URL.Path == "/api/v1/backups/import")
 	}
@@ -70,6 +75,20 @@ func backupReviewHandler(writer http.ResponseWriter, request *http.Request) {
 			return
 		}
 		review, err := backupreview.InspectProfile([]byte(original))
+		if err != nil {
+			problem(http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(writer, http.StatusOK, review)
+		return
+	}
+	if preflightMode {
+		var plan, preflight string
+		if json.Unmarshal(fields["plan"], &plan) != nil || json.Unmarshal(fields["preflight"], &preflight) != nil {
+			problem(http.StatusBadRequest, "plan and preflight must be JSON strings containing original UTF-8 documents")
+			return
+		}
+		review, err := backupreview.EvaluatePreflight([]byte(plan), []byte(preflight))
 		if err != nil {
 			problem(http.StatusUnprocessableEntity, err.Error())
 			return

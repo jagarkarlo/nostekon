@@ -43,6 +43,54 @@ func TestValidationProfileRoute(t *testing.T) {
 	}
 }
 
+func TestBackupPreflightRoute(t *testing.T) {
+	plan, err := os.ReadFile("../../studio/e2e/postgresql-semantic-rehearsal.plan.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight := `{
+  "apiVersion": "nostekon/backup-preflight/v1alpha1",
+  "kind": "PostgreSQLBackupPreflight",
+  "passed": true,
+  "backupMatches": true,
+  "backup": { "sha256": "6d9a0a2794de72ac5c986ccbfa9487c2d7c6a2e2935b27cb0916bac3bf092c50", "bytes": 3323 },
+  "planSHA256": "988df63edaa9bf7f3f749d22de856f23aec91dfcd167df4e1d5163a8ebb6e7e1",
+  "imageId": "sha256:2698c2096ca78a41ae7477580afb30fe36d5368564511b2ea593dbfb26401fdd",
+  "requestedLevel": "V4",
+  "checks": [
+    { "name": "backup-plan-binding", "passed": true, "detail": "Frozen archive checksum and size match the plan" },
+    { "name": "snapshot-count-coverage", "passed": true, "detail": "At least one table count is declared" },
+    { "name": "local-linux-daemon", "passed": true, "detail": "Local Linux Docker daemon on a supported native architecture" },
+    { "name": "daemon-resource-floor", "passed": true, "detail": "At least 512 MiB and one CPU advertised; free capacity untested" },
+    { "name": "native-pinned-image", "passed": true, "detail": "Exact cached Linux image matches native daemon architecture" }
+  ],
+  "limitations": [
+    "Technical prerequisites only; not approval, sanitization or dedicated-host confirmation",
+    "Header/byte binding only; full archive validity and restore success untested",
+    "No restore ran; capture authenticity, incident RTO and acknowledged-write RPO unmeasured"
+  ]
+}`
+	validBody, _ := json.Marshal(map[string]string{"plan": string(plan), "preflight": preflight})
+	for _, test := range []struct {
+		body   string
+		status int
+	}{
+		{string(validBody), 200},
+		{`{}`, 400},
+		{`{"plan":"{}","preflight":null}`, 400},
+		{`{"plan":"{}","preflight":"{}"}`, 422},
+		{`{"plan":"` + strings.Repeat("x", 12*backupreview.MaxPlanBytes+1024) + `","preflight":"{}"}`, 413},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/backups/preflight", strings.NewReader(test.body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		NewHandler().ServeHTTP(response, request)
+		if response.Code != test.status {
+			t.Fatalf("preflight route: expected %d got %d (%s)", test.status, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestBackupReviewAndBundleRoutes(t *testing.T) {
 	plan, err := os.ReadFile("../../studio/e2e/postgresql-semantic-rehearsal.plan.json")
 	if err != nil {

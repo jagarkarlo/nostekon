@@ -329,3 +329,90 @@ func TestRejectsEvidenceDriftAndContradictoryMeasurements(t *testing.T) {
 		})
 	}
 }
+
+func preflightFixture(t *testing.T, semantic bool) ([]byte, []byte) {
+	t.Helper()
+	planData, _ := validFixture(t, semantic)
+	_, identity, err := parsePlan(planData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	level := "V3"
+	if semantic {
+		level = "V4"
+	}
+	preflight := map[string]any{
+		"apiVersion":     "nostekon/backup-preflight/v1alpha1",
+		"kind":           "PostgreSQLBackupPreflight",
+		"passed":         true,
+		"backupMatches":  true,
+		"backup":         map[string]any{"sha256": strings.Repeat("a", 64), "bytes": 5},
+		"planSHA256":     identity,
+		"imageId":        "sha256:" + strings.Repeat("b", 64),
+		"requestedLevel": level,
+		"checks": []map[string]any{
+			{"name": "backup-plan-binding", "passed": true, "detail": "Frozen archive checksum and size match the plan"},
+			{"name": "snapshot-count-coverage", "passed": true, "detail": "At least one table count is declared"},
+			{"name": "local-linux-daemon", "passed": true, "detail": "Local Linux Docker daemon on a supported native architecture"},
+			{"name": "daemon-resource-floor", "passed": true, "detail": "At least 512 MiB and one CPU advertised; free capacity untested"},
+			{"name": "native-pinned-image", "passed": true, "detail": "Exact cached Linux image matches native daemon architecture"},
+		},
+		"limitations": []string{
+			"Technical prerequisites only; not approval, sanitization or dedicated-host confirmation",
+			"Header/byte binding only; full archive validity and restore success untested",
+			"No restore ran; capture authenticity, incident RTO and acknowledged-write RPO unmeasured",
+		},
+	}
+	data, err := json.Marshal(preflight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return planData, data
+}
+
+func TestPreflightEvaluationMatchesPlanAndRejectsTampering(t *testing.T) {
+	for _, semantic := range []bool{false, true} {
+		planData, preflightData := preflightFixture(t, semantic)
+		review, err := EvaluatePreflight(planData, preflightData)
+		if err != nil || !review.Passed || !review.PlanMatches || !review.BackupMatches || len(review.Issues) != 0 {
+			t.Fatalf("semantic=%v: %+v, %v", semantic, review, err)
+		}
+		if review.PlanFileSHA256 != digest(planData) || review.PreflightSHA256 != digest(preflightData) {
+			t.Fatal("preflight digests not preserved")
+		}
+	}
+	planData, preflightData := preflightFixture(t, true)
+	for _, mutation := range []struct {
+		name, before, after string
+		decodeErr           bool
+	}{
+		{"wrong plan hash", `"planSHA256":"e2fa786c149b75da09d5a66d076095a4f657d3f0db89cd8d5d3cce4a655519fe"`, `"planSHA256":"` + strings.Repeat("0", 64) + `"`, false},
+		{"wrong image", `"imageId":"sha256:` + strings.Repeat("b", 64), `"imageId":"sha256:` + strings.Repeat("c", 64), false},
+		{"wrong level", `"requestedLevel":"V4"`, `"requestedLevel":"V3"`, false},
+		{"contradictory passed", `"passed":true,"planSHA256"`, `"passed":false,"planSHA256"`, false},
+		{"failed image check", `"name":"native-pinned-image","passed":true`, `"name":"native-pinned-image","passed":false`, false},
+		{"unknown field", `"requestedLevel":"V4"`, `"requestedLevel":"V4","extra":true`, true},
+		{"duplicate field", `"kind":"PostgreSQLBackupPreflight"`, `"kind":"PostgreSQLBackupPreflight","kind":"PostgreSQLBackupPreflight"`, true},
+		{"null limitation", `"No restore ran`, `null,"No restore ran`, true},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			altered := bytes.Replace(preflightData, []byte(mutation.before), []byte(mutation.after), 1)
+			if bytes.Equal(altered, preflightData) {
+				t.Fatal("mutation did not alter preflight fixture")
+			}
+			review, err := EvaluatePreflight(planData, altered)
+			if mutation.decodeErr {
+				if err == nil {
+					t.Fatalf("expected decode error for %s", mutation.name)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %s: %v", mutation.name, err)
+			}
+			if review.Passed || len(review.Issues) == 0 {
+				t.Fatalf("tampered preflight passed: %+v", review)
+			}
+		})
+	}
+}

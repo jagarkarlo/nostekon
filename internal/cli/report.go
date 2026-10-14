@@ -48,7 +48,7 @@ func readBackupInput(path string, limit int64) ([]byte, error) {
 // Run evaluates a captured DrillRun file. The exported entry point is shared
 // by the standalone command and tests.
 func Run(args []string, stdout, stderr io.Writer) int {
-	usage := "usage: nostekon-report [--validation-profile | --suite | --backup-plan PLAN.json [--export-backup-bundle] | --backup-bundle] [--attestation FILE --trusted-key PUBLIC.pem] [--pushgateway-url URL [--pushgateway-job NAME] [--pushgateway-instance NAME]] <profile.json | run.json | suite-directory | evidence.zip>"
+	usage := "usage: nostekon-report [--validation-profile | --suite | --backup-plan PLAN.json [--backup-preflight | --export-backup-bundle] | --backup-bundle] [--attestation FILE --trusted-key PUBLIC.pem] [--pushgateway-url URL [--pushgateway-job NAME] [--pushgateway-instance NAME]] <profile.json | preflight.json | run.json | suite-directory | evidence.zip>"
 	if len(args) == 0 || len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Fprintln(stderr, usage)
 		if len(args) == 1 {
@@ -60,7 +60,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	profileMode := flags.Bool("validation-profile", false, "inspect a semantic validation profile without database access or measurements")
 	suiteMode := flags.Bool("suite", false, "gate a captured PostgreSQL policy suite directory or evidence ZIP")
-	backupPlanPath := flags.String("backup-plan", "", "independently gate captured backup evidence against a reviewed restore plan")
+	backupPlanPath := flags.String("backup-plan", "", "independently gate captured backup evidence or preflight against a reviewed restore plan")
+	backupPreflightMode := flags.Bool("backup-preflight", false, "with --backup-plan, gate a metadata-only backup preflight JSON against the restore plan")
 	backupBundleMode := flags.Bool("backup-bundle", false, "gate an original-only backup bundle offline with a freshly computed review")
 	exportBackupBundle := flags.Bool("export-backup-bundle", false, "with --backup-plan, write a portable ZIP to stdout instead of review JSON")
 	attestationPath := flags.String("attestation", "", "detached Ed25519 attestation JSON file")
@@ -111,10 +112,37 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			backupMode = true
 		}
 	})
-	if backupMode || *backupBundleMode || *exportBackupBundle {
-		if *suiteMode || *attestationPath != "" || *pushgatewayURL != "" || *pushgatewayJob != "nostekon" || *pushgatewayInstance != "" || backupMode && *backupBundleMode || *exportBackupBundle && !backupMode {
-			fmt.Fprintln(stderr, "backup modes cannot be combined or use suite, attestation or Pushgateway flags; export requires --backup-plan")
+	if backupMode || *backupPreflightMode || *backupBundleMode || *exportBackupBundle {
+		if *suiteMode || *attestationPath != "" || *pushgatewayURL != "" || *pushgatewayJob != "nostekon" || *pushgatewayInstance != "" || backupMode && *backupBundleMode || *backupPreflightMode && (!backupMode || *exportBackupBundle || *backupBundleMode) || *exportBackupBundle && !backupMode {
+			fmt.Fprintln(stderr, "backup modes cannot be combined or use suite, attestation or Pushgateway flags; preflight and export require --backup-plan")
 			return 2
+		}
+		if *backupPreflightMode {
+			planData, err := readBackupInput(*backupPlanPath, backupreview.MaxPlanBytes)
+			if err != nil {
+				fmt.Fprintf(stderr, "read backup plan: %v\n", err)
+				return 2
+			}
+			preflightData, err := readBackupInput(flags.Arg(0), backupreview.MaxPlanBytes)
+			if err != nil {
+				fmt.Fprintf(stderr, "read backup preflight: %v\n", err)
+				return 2
+			}
+			review, err := backupreview.EvaluatePreflight(planData, preflightData)
+			if err != nil {
+				fmt.Fprintf(stderr, "review backup preflight: %v\n", err)
+				return 2
+			}
+			encoder := json.NewEncoder(stdout)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(review); err != nil {
+				fmt.Fprintf(stderr, "write backup preflight review: %v\n", err)
+				return 2
+			}
+			if review.Passed {
+				return 0
+			}
+			return 1
 		}
 		var planData, evidenceData []byte
 		var review backupreview.Review
