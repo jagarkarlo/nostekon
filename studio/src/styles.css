@@ -434,7 +434,14 @@ button.finding:hover { filter: brightness(1.12); }
 .example-filter button:hover { color: var(--accent-ink); }
 .example-filter span { font: 12px var(--mono); color: var(--ink-3); }
 @media (max-width: 760px) { .sample-rows, .workspace-shortcuts { grid-template-columns: minmax(0, 1fr); } .workspace-shortcuts { gap: 12px; } }
-@media (prefers-reduced-motion: no-preference) { .run-library { animation: workspace-arrive .22s ease-out; } @keyframes workspace-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } } }
+@media (prefers-reduced-motion: no-preference) {
+  .run-library, .profile-workspace, .layout, .report-body, .level-detail, .run-comparison, .backup-workbench { animation: workspace-arrive .22s ease-out; }
+  .timeline-bar { animation: timeline-grow .38s cubic-bezier(.16, 1, .3, 1) both; }
+  .gauge span { transition: width .35s cubic-bezier(.16, 1, .3, 1); }
+  .views a, .tool, .primary, .icon-button, .level-node, .template, .sample-rows button, .example-filter button, .report-tabs [role="tab"] { transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease; }
+  @keyframes workspace-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes timeline-grow { from { opacity: .45; transform: scaleX(0); } to { opacity: 1; transform: scaleX(1); } }
+}
 .sample-symbol { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn); }
 .sample-symbol.recorded { background: var(--accent-soft); color: var(--accent); }
 .run-comparison { margin-top: 32px; padding-top: 14px; border-top: 2px solid var(--accent); }

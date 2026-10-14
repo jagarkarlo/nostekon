@@ -452,7 +452,7 @@ function ReportBody({ report, onCopy, copied }: { report: Report; onCopy: () => 
             </li>
           ))}
         </ol>
-        <LevelDetail level={level} />
+        <LevelDetail key={level.id} level={level} />
       </section>
 
       {report.rto && <PhaseTimeline rto={report.rto} rehearsal={rehearsal} />}

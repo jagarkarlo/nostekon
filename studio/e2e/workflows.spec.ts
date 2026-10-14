@@ -199,6 +199,7 @@ for (const width of [390, 1440]) {
     await page.screenshot({ path: test.info().outputPath(`workspace-alternate-${width}.png`), fullPage: true, animations: "disabled" });
     await page.getByRole("link", { name: "Author a validation profile", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Validation profiles", exact: true })).toBeVisible();
+    expect(await page.locator(".profile-workspace").evaluate(element => getComputedStyle(element).animationName)).toBe("workspace-arrive");
     await page.getByRole("link", { name: "Runs", exact: true }).click();
     await page.getByRole("link", { name: "Review a policy suite", exact: true }).click();
     await expect(page).toHaveURL(/#\/suite$/);
