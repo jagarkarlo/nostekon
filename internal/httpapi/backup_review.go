@@ -58,11 +58,15 @@ func backupReviewHandler(writer http.ResponseWriter, request *http.Request) {
 	}
 	var fields map[string]json.RawMessage
 	if profileMode {
-		fields, err = backupStringFields(body, "profile")
+		fields, err = backupStringFields(body, []string{"profile"})
 	} else if preflightMode {
-		fields, err = backupStringFields(body, "plan", "preflight")
+		fields, err = backupStringFields(body, []string{"plan", "preflight"})
+	} else if request.URL.Path == "/api/v1/backups/import" {
+		fields, err = backupStringFields(body, []string{"bundle"})
+	} else if request.URL.Path == "/api/v1/backups/bundle" {
+		fields, err = backupStringFields(body, []string{"plan", "evidence"}, "preflight")
 	} else {
-		fields, err = backupRequestFields(body, request.URL.Path == "/api/v1/backups/import")
+		fields, err = backupStringFields(body, []string{"plan", "evidence"})
 	}
 	if err != nil {
 		problem(http.StatusBadRequest, err.Error())
@@ -108,19 +112,27 @@ func backupReviewHandler(writer http.ResponseWriter, request *http.Request) {
 			return
 		}
 		writeJSON(writer, http.StatusOK, struct {
-			Plan     string              `json:"plan"`
-			Evidence string              `json:"evidence"`
-			Review   backupreview.Review `json:"review"`
-		}{string(imported.Plan), string(imported.Evidence), imported.Review})
+			Plan            string                        `json:"plan"`
+			Preflight       string                        `json:"preflight,omitempty"`
+			Evidence        string                        `json:"evidence"`
+			Review          backupreview.Review           `json:"review"`
+			PreflightReview *backupreview.PreflightReview `json:"preflightReview,omitempty"`
+		}{string(imported.Plan), string(imported.Preflight), string(imported.Evidence), imported.Review, imported.PreflightReview})
 		return
 	}
-	var plan, evidence string
+	var plan, evidence, preflight string
 	if json.Unmarshal(fields["plan"], &plan) != nil || json.Unmarshal(fields["evidence"], &evidence) != nil {
 		problem(http.StatusBadRequest, "plan and evidence must be JSON strings containing original UTF-8 documents")
 		return
 	}
+	if rawPreflight, ok := fields["preflight"]; ok {
+		if json.Unmarshal(rawPreflight, &preflight) != nil || preflight == "" {
+			problem(http.StatusBadRequest, "preflight must be a nonempty JSON string")
+			return
+		}
+	}
 	if request.URL.Path == "/api/v1/backups/bundle" {
-		archive, err := backupreview.Bundle([]byte(plan), []byte(evidence))
+		archive, err := backupreview.BundleWithPreflight([]byte(plan), []byte(evidence), []byte(preflight))
 		if err != nil {
 			problem(http.StatusUnprocessableEntity, err.Error())
 			return
@@ -138,14 +150,8 @@ func backupReviewHandler(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, review)
 }
 
-func backupRequestFields(body []byte, importing bool) (map[string]json.RawMessage, error) {
-	if importing {
-		return backupStringFields(body, "bundle")
-	}
-	return backupStringFields(body, "plan", "evidence")
-}
-
-func backupStringFields(body []byte, names ...string) (map[string]json.RawMessage, error) {
+func backupStringFields(body []byte, required []string, optional ...string) (map[string]json.RawMessage, error) {
+	allowed := append(slices.Clone(required), optional...)
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
@@ -159,7 +165,7 @@ func backupStringFields(body []byte, names ...string) (map[string]json.RawMessag
 		}
 		key, ok := token.(string)
 		_, duplicate := fields[key]
-		if !ok || duplicate || !slices.Contains(names, key) {
+		if !ok || duplicate || !slices.Contains(allowed, key) {
 			return nil, errors.New("unknown or duplicate backup request field")
 		}
 		var value json.RawMessage
@@ -177,8 +183,10 @@ func backupStringFields(body []byte, names ...string) (map[string]json.RawMessag
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("backup request requires one JSON document")
 	}
-	if len(fields) != len(names) {
-		return nil, errors.New("missing backup request fields")
+	for _, name := range required {
+		if _, ok := fields[name]; !ok {
+			return nil, errors.New("missing backup request fields")
+		}
 	}
 	return fields, nil
 }

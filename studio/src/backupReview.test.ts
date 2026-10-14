@@ -46,8 +46,8 @@ it("uses standard base64 at the transport boundary without altering ZIP bytes", 
   const archive = new Uint8Array([80, 75, 3, 4, 0, 255]);
   vi.mocked(request).mockResolvedValueOnce(new Response(JSON.stringify({ bundle: "UEsDBAD/" })));
   expect(await exportBackupBundle("{}", "{}" )).toEqual(archive);
-  vi.mocked(request).mockResolvedValueOnce(new Response(JSON.stringify({ plan: "{}\n", evidence: " {}\n", review })));
-  expect(await importBackupBundle(new File([archive], "capture.zip"))).toEqual({ plan: "{}\n", evidence: " {}\n", review });
+  vi.mocked(request).mockResolvedValueOnce(new Response(JSON.stringify({ plan: "{}\n", preflight: "{}\n", evidence: " {}\n", review, preflightReview })));
+  expect(await importBackupBundle(new File([archive], "capture.zip"))).toEqual({ plan: "{}\n", preflight: "{}\n", evidence: " {}\n", review, preflightReview });
   expect(request).toHaveBeenLastCalledWith("/api/v1/backups/import", JSON.stringify({ bundle: "UEsDBAD/" }));
 });
 

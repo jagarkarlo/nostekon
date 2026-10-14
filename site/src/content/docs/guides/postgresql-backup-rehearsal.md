@@ -504,22 +504,25 @@ states: pass/fail, complete/incomplete measurements, and matching/mismatched pla
 claims. Changing either original invalidates the previous review. Original plan,
 evidence and fresh review downloads remain available; no database is contacted.
 
-**Export backup bundle** produces a portable ZIP with exactly four known entries:
-`manifest.json`, `plan.json`, `run.json`, and `review.json`. The manifest records
-SHA-256 and byte lengths for the three documents. Plan/run bytes are preserved,
+**Export backup bundle** produces a portable ZIP with four known entries
+(`manifest.json`, `plan.json`, `run.json`, and `review.json`) under
+`nostekon/backup-bundle/v1alpha1`, or five entries including `preflight.json`
+under `nostekon/backup-bundle/v2alpha1` when a host preflight original is
+attached. The manifest records
+SHA-256 and byte lengths for the included documents. Plan, preflight and run bytes are preserved,
 including whitespace. Failed and incomplete captures can be shared; exporting
 does not turn their gate into a pass. No dump, recovery snapshot, checkpoint,
 private key, credential or raw database output is added by the exporter.
 
 **Import backup bundle** verifies the inventory, sizes and checksums, then
-evaluates the original plan/run again. The cached review is never authoritative:
+evaluates the original plan/run (and optional preflight) again. The cached review is never authoritative:
 even a forged passing receipt with updated checksums cannot upgrade the fresh
 verdict or provenance. Import does not grant signature trust or save anything
-automatically. **Save run** explicitly stores the exact attached plan alongside
-the original evidence in this browser. Reopening it calculates a fresh plan
-review, not a cached verdict. Save again after removing or replacing a plan.
-Runs can download the original plan or back up and restore attached originals
-across browser origins. Export a bundle to share the plan/run/review inventory;
+automatically. **Save run** explicitly stores the exact attached plan and preflight alongside
+the original evidence in this browser. Reopening it calculates a fresh plan and preflight
+review, not a cached verdict. Save again after removing or replacing a plan or preflight.
+Runs can download the original plan or preflight, or back up and restore attached originals
+across browser origins. Export a bundle to share the plan/preflight/run/review inventory;
 it is separate from the saved-run history backup.
 
 The native report binary supports the same offline round-trip. Use a new output
@@ -543,9 +546,9 @@ These modes cannot mix suite, attestation or Pushgateway flags.
 
 Admission permits only uncompressed regular ZIP entries with unique known names;
 no paths are extracted. ZIP directory metadata is checked before allocating
-entries and is limited to four records within 4 KiB; ZIP64, multiple disks,
+entries and is limited to four or five records within 4 KiB; ZIP64, multiple disks,
 archive comments and trailing bytes are rejected. Total archive size is limited
-to 20 MiB, plan to 16 KiB,
+to 20 MiB, plan and optional preflight to 16 KiB each,
 run to 16 MiB, cached review to 2 MiB, and manifest to 16 KiB. The browser preserves
 valid UTF-8 originals and rejects lossy file decoding. Checksums establish
 integrity and consistency, **not authenticity**: a party able to forge both

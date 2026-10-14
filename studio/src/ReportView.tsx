@@ -339,8 +339,8 @@ export function ReportView({ onReachability, selection }: { onReachability: (onl
         {sourceError && <div className="banner bad" role="alert"><XCircle size={15} /> {sourceError}</div>}
 
         <div hidden={tab !== "plan"}>
-          <BackupWorkbench evidence={source} plan={backupPlan} preflight={backupPreflight} onPlanChange={plan => { saveRevision.current++; setBackupPlan(plan); if (!plan.text) setBackupPreflight({ text: "", name: "" }); setSaved(false); }} onPreflightChange={preflight => { saveRevision.current++; setBackupPreflight(preflight); setSaved(false); }} onImport={text => {
-            setSource(text); setSampleId(""); setSourceError(""); setAttestation(""); setAttestationName(""); setArchiveResult(""); setImportedKey(undefined); setBackupPreflight({ text: "", name: "" });
+          <BackupWorkbench evidence={source} plan={backupPlan} preflight={backupPreflight} onPlanChange={plan => { saveRevision.current++; setBackupPlan(plan); if (!plan.text) setBackupPreflight({ text: "", name: "" }); setSaved(false); }} onPreflightChange={preflight => { saveRevision.current++; setBackupPreflight(preflight); setSaved(false); }} onImport={(text, importedPreflight) => {
+            setSource(text); setSampleId(""); setSourceError(""); setAttestation(""); setAttestationName(""); setArchiveResult(""); setImportedKey(undefined); setBackupPreflight({ text: importedPreflight ?? "", name: importedPreflight ? "preflight.json" : "" });
             void build(text, undefined, "", false);
           }} />
         </div>

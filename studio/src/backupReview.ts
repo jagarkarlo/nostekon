@@ -100,9 +100,10 @@ export async function reviewBackupPreflight(plan: string, preflight: string): Pr
   return result;
 }
 
-export async function exportBackupBundle(plan: string, evidence: string): Promise<Uint8Array<ArrayBuffer>> {
+export async function exportBackupBundle(plan: string, evidence: string, preflight?: string): Promise<Uint8Array<ArrayBuffer>> {
   boundOriginals(plan, evidence);
-  const result = await post("/api/v1/backups/bundle", { plan, evidence });
+  if (preflight !== undefined && preflight !== "" && new TextEncoder().encode(preflight).length > MAX_PLAN_BYTES) throw new Error("Backup preflight must be within 16 KiB.");
+  const result = await post("/api/v1/backups/bundle", preflight ? { plan, evidence, preflight } : { plan, evidence });
   const encoded = (result as { bundle?: unknown } | null)?.bundle;
   if (typeof encoded !== "string" || encoded.length > 4 * Math.ceil(MAX_BACKUP_BUNDLE_BYTES / 3)) throw new Error("Invalid or oversized backup bundle response.");
   let archive: Uint8Array<ArrayBuffer>;
@@ -112,7 +113,7 @@ export async function exportBackupBundle(plan: string, evidence: string): Promis
   return archive;
 }
 
-export async function importBackupBundle(file: File): Promise<{ plan: string; evidence: string; review: BackupReview }> {
+export async function importBackupBundle(file: File): Promise<{ plan: string; preflight?: string; evidence: string; review: BackupReview; preflightReview?: PreflightReview }> {
   if (!file.size || file.size > MAX_BACKUP_BUNDLE_BYTES) throw new Error("Backup bundle must be nonempty and within 20 MiB.");
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (!bytes.length || bytes.length > MAX_BACKUP_BUNDLE_BYTES) throw new Error("Backup bundle exceeds 20 MiB.");
@@ -120,10 +121,13 @@ export async function importBackupBundle(file: File): Promise<{ plan: string; ev
   for (let offset = 0; offset < bytes.length; offset += 32768) chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
   const result = await post("/api/v1/backups/import", { bundle: btoa(chunks.join("")) });
   if (!result || typeof result !== "object") throw new Error("Invalid backup bundle import response.");
-  const imported = result as { plan?: unknown; evidence?: unknown; review?: unknown };
-  if (typeof imported.plan !== "string" || typeof imported.evidence !== "string" || !isBackupReview(imported.review)) throw new Error("Invalid backup bundle originals or fresh review.");
+  const imported = result as { plan?: unknown; preflight?: unknown; evidence?: unknown; review?: unknown; preflightReview?: unknown };
+  if (typeof imported.plan !== "string" || typeof imported.evidence !== "string" || !isBackupReview(imported.review)
+    || (imported.preflight !== undefined && typeof imported.preflight !== "string")
+    || (imported.preflightReview !== undefined && !isPreflightReview(imported.preflightReview))) throw new Error("Invalid backup bundle originals or fresh review.");
   boundOriginals(imported.plan, imported.evidence);
-  return { plan: imported.plan, evidence: imported.evidence, review: imported.review };
+  if (imported.preflight && new TextEncoder().encode(imported.preflight).length > MAX_PLAN_BYTES) throw new Error("Backup preflight exceeds 16 KiB.");
+  return { plan: imported.plan, preflight: imported.preflight, evidence: imported.evidence, review: imported.review, preflightReview: imported.preflightReview };
 }
 
 export async function readOriginalJSON(file: File, limit: number): Promise<string> {

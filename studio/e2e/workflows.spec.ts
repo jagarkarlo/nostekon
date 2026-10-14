@@ -511,6 +511,17 @@ for (const width of [390, 1440]) {
     const preflightOriginalDownload = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download original backup preflight", exact: true }).click();
     expect(await readFile((await (await preflightOriginalDownload).path())!)).toEqual(preflightBuffer);
+    const v2BundleDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export backup bundle", exact: true }).click();
+    const v2Archive = await readFile((await (await v2BundleDownload).path())!);
+    const v2Entries = unzipSync(v2Archive);
+    expect(Object.keys(v2Entries).sort()).toEqual(["manifest.json", "plan.json", "preflight.json", "review.json", "run.json"]);
+    expect(Buffer.from(v2Entries["preflight.json"])).toEqual(preflightBuffer);
+    expect(JSON.parse(Buffer.from(v2Entries["manifest.json"]).toString()).apiVersion).toBe("nostekon/backup-bundle/v2alpha1");
+    await page.getByRole("button", { name: "Remove restore plan", exact: true }).click();
+    await expect(preflightGate).toHaveCount(0);
+    await page.getByTestId("backup-bundle-input").setInputFiles({ name: "v2-bundle.zip", mimeType: "application/zip", buffer: v2Archive });
+    await expect(preflightGate).toContainText("Ready");
     const blockedPreflight = {
       ...preflightObject,
       passed: false,

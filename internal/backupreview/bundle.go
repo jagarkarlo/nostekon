@@ -25,17 +25,28 @@ type bundleManifest struct {
 }
 
 type ImportedBundle struct {
-	Plan     []byte `json:"-"`
-	Evidence []byte `json:"-"`
-	Review   Review `json:"review"`
+	Plan            []byte           `json:"-"`
+	Preflight       []byte           `json:"-"`
+	Evidence        []byte           `json:"-"`
+	Review          Review           `json:"review"`
+	PreflightReview *PreflightReview `json:"preflightReview,omitempty"`
 }
 
-var bundleLimits = map[string]int64{"manifest.json": 16 << 10, "plan.json": MaxPlanBytes, "run.json": 16 << 20, "review.json": 2 << 20}
+var bundleLimits = map[string]int64{"manifest.json": 16 << 10, "plan.json": MaxPlanBytes, "preflight.json": MaxPlanBytes, "run.json": 16 << 20, "review.json": 2 << 20}
 
 func Bundle(planData, evidenceData []byte) ([]byte, error) {
+	return BundleWithPreflight(planData, evidenceData, nil)
+}
+
+func BundleWithPreflight(planData, evidenceData, preflightData []byte) ([]byte, error) {
 	review, err := Evaluate(planData, evidenceData)
 	if err != nil {
 		return nil, err
+	}
+	if len(preflightData) > 0 {
+		if _, err := EvaluatePreflight(planData, preflightData); err != nil {
+			return nil, err
+		}
 	}
 	reviewData, err := json.MarshalIndent(review, "", "  ")
 	if err != nil {
@@ -43,7 +54,14 @@ func Bundle(planData, evidenceData []byte) ([]byte, error) {
 	}
 	reviewData = append(reviewData, '\n')
 	files := map[string][]byte{"plan.json": planData, "run.json": evidenceData, "review.json": reviewData}
-	manifest := bundleManifest{APIVersion: "nostekon/backup-bundle/v1alpha1", Kind: "PostgreSQLBackupBundle", Files: map[string]bundleItem{}}
+	order := []string{"manifest.json", "plan.json", "run.json", "review.json"}
+	manifestVersion := "nostekon/backup-bundle/v1alpha1"
+	if len(preflightData) > 0 {
+		files["preflight.json"] = preflightData
+		order = []string{"manifest.json", "plan.json", "preflight.json", "run.json", "review.json"}
+		manifestVersion = "nostekon/backup-bundle/v2alpha1"
+	}
+	manifest := bundleManifest{APIVersion: manifestVersion, Kind: "PostgreSQLBackupBundle", Files: map[string]bundleItem{}}
 	for name, data := range files {
 		if len(data) == 0 || int64(len(data)) > bundleLimits[name] {
 			return nil, errors.New("bundle entry exceeds its size limit")
@@ -57,7 +75,7 @@ func Bundle(planData, evidenceData []byte) ([]byte, error) {
 	files["manifest.json"] = append(files["manifest.json"], '\n')
 	var output bytes.Buffer
 	writer := zip.NewWriter(&output)
-	for _, name := range []string{"manifest.json", "plan.json", "run.json", "review.json"} {
+	for _, name := range order {
 		header := &zip.FileHeader{Name: name, Method: zip.Store}
 		header.SetMode(0600)
 		handle, err := writer.CreateHeader(header)
@@ -82,14 +100,14 @@ func ReadBundle(data []byte) (ImportedBundle, error) {
 		return ImportedBundle{}, errors.New("backup bundle must be nonempty and within 20 MiB")
 	}
 	if !boundedBundleDirectory(data) {
-		return ImportedBundle{}, errors.New("backup bundle requires a bounded four-entry single-disk ZIP directory with no trailing bytes")
+		return ImportedBundle{}, errors.New("backup bundle requires a bounded four- or five-entry single-disk ZIP directory with no trailing bytes")
 	}
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return ImportedBundle{}, err
 	}
-	if len(archive.File) != 4 {
-		return ImportedBundle{}, errors.New("backup bundle requires exactly four entries")
+	if len(archive.File) != 4 && len(archive.File) != 5 {
+		return ImportedBundle{}, errors.New("backup bundle requires four or five entries")
 	}
 	files := map[string][]byte{}
 	for _, file := range archive.File {
@@ -126,7 +144,14 @@ func ReadBundle(data []byte) (ImportedBundle, error) {
 	if err := decoder.Decode(&manifest); err != nil {
 		return ImportedBundle{}, err
 	}
-	if manifest.APIVersion != "nostekon/backup-bundle/v1alpha1" || manifest.Kind != "PostgreSQLBackupBundle" || len(manifest.Files) != 3 {
+	v2 := manifest.APIVersion == "nostekon/backup-bundle/v2alpha1"
+	expectedEntries := 3
+	requiredNames := []string{"plan.json", "run.json", "review.json"}
+	if v2 {
+		expectedEntries = 4
+		requiredNames = append(requiredNames, "preflight.json")
+	}
+	if !v2 && manifest.APIVersion != "nostekon/backup-bundle/v1alpha1" || manifest.Kind != "PostgreSQLBackupBundle" || len(manifest.Files) != expectedEntries || len(files) != expectedEntries+1 {
 		return ImportedBundle{}, errors.New("unsupported backup bundle version, kind or file inventory")
 	}
 	var raw struct {
@@ -135,7 +160,7 @@ func ReadBundle(data []byte) (ImportedBundle, error) {
 	if err := json.Unmarshal(manifestData, &raw); err != nil {
 		return ImportedBundle{}, err
 	}
-	for _, name := range []string{"plan.json", "run.json", "review.json"} {
+	for _, name := range requiredNames {
 		item, present := manifest.Files[name]
 		if !present || !exactFields(raw.Files[name], "sha256", "bytes") || !digestPattern.MatchString(item.SHA256) || item.Bytes != int64(len(files[name])) || item.SHA256 != digest(files[name]) {
 			return ImportedBundle{}, fmt.Errorf("backup bundle checksum or size mismatch: %s", name)
@@ -148,7 +173,16 @@ func ReadBundle(data []byte) (ImportedBundle, error) {
 	if err != nil {
 		return ImportedBundle{}, err
 	}
-	return ImportedBundle{Plan: files["plan.json"], Evidence: files["run.json"], Review: review}, nil
+	imported := ImportedBundle{Plan: files["plan.json"], Evidence: files["run.json"], Review: review}
+	if v2 {
+		preflightReview, err := EvaluatePreflight(files["plan.json"], files["preflight.json"])
+		if err != nil {
+			return ImportedBundle{}, err
+		}
+		imported.Preflight = files["preflight.json"]
+		imported.PreflightReview = &preflightReview
+	}
+	return imported, nil
 }
 
 func boundedBundleDirectory(data []byte) bool {
@@ -156,7 +190,9 @@ func boundedBundleDirectory(data []byte) bool {
 		return false
 	}
 	footer := data[len(data)-22:]
-	if binary.LittleEndian.Uint32(footer) != 0x06054b50 || binary.LittleEndian.Uint16(footer[4:]) != 0 || binary.LittleEndian.Uint16(footer[6:]) != 0 || binary.LittleEndian.Uint16(footer[8:]) != 4 || binary.LittleEndian.Uint16(footer[10:]) != 4 || binary.LittleEndian.Uint16(footer[20:]) != 0 {
+	count := binary.LittleEndian.Uint16(footer[8:])
+	totalCount := binary.LittleEndian.Uint16(footer[10:])
+	if binary.LittleEndian.Uint32(footer) != 0x06054b50 || binary.LittleEndian.Uint16(footer[4:]) != 0 || binary.LittleEndian.Uint16(footer[6:]) != 0 || count != totalCount || count != 4 && count != 5 || binary.LittleEndian.Uint16(footer[20:]) != 0 {
 		return false
 	}
 	start := uint64(binary.LittleEndian.Uint32(footer[16:]))
@@ -165,7 +201,7 @@ func boundedBundleDirectory(data []byte) bool {
 		return false
 	}
 	directory := data[start : start+size]
-	for range 4 {
+	for range count {
 		if len(directory) < 46 || binary.LittleEndian.Uint32(directory) != 0x02014b50 {
 			return false
 		}

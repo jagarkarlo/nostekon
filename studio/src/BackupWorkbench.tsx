@@ -11,7 +11,7 @@ function download(name: string, content: BlobPart, type: string) {
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
-export function BackupWorkbench({ evidence, onImport, plan, onPlanChange, preflight, onPreflightChange }: { evidence: string; onImport: (source: string) => void; plan: { text: string; name: string }; onPlanChange: (plan: { text: string; name: string }) => void; preflight: { text: string; name: string }; onPreflightChange: (preflight: { text: string; name: string }) => void }) {
+export function BackupWorkbench({ evidence, onImport, plan, onPlanChange, preflight, onPreflightChange }: { evidence: string; onImport: (source: string, preflight?: string) => void; plan: { text: string; name: string }; onPlanChange: (plan: { text: string; name: string }) => void; preflight: { text: string; name: string }; onPreflightChange: (preflight: { text: string; name: string }) => void }) {
   const [result, setResult] = useState<{ plan: string; evidence: string; review: BackupReview } | null>(null);
   const [preflightResult, setPreflightResult] = useState<{ plan: string; preflight: string; review: PreflightReview } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -87,17 +87,17 @@ export function BackupWorkbench({ evidence, onImport, plan, onPlanChange, prefli
       const imported = await importBackupBundle(file);
       if (current !== generation.current) return;
       onPlanChange({ text: imported.plan, name: "plan.json" });
-      onImport(imported.evidence);
+      onImport(imported.evidence, imported.preflight);
     } catch (reason) { if (current === generation.current) setError(message(reason)); }
     finally { if (current === generation.current) setBusy(false); }
   }
 
   async function exportBundle() {
-    if (!fresh || busy) return;
+    if (!fresh || busy || preflightBusy || (preflight.text !== "" && !freshPreflight)) return;
     const current = ++generation.current;
     setBusy(true); setError("");
     try {
-      const archive = await exportBackupBundle(plan.text, evidence);
+      const archive = await exportBackupBundle(plan.text, evidence, preflight.text || undefined);
       if (current === generation.current) download("nostekon.backup-review.zip", archive, "application/zip");
     } catch (reason) { if (current === generation.current) setError(message(reason)); }
     finally { if (current === generation.current) setBusy(false); }
@@ -109,7 +109,7 @@ export function BackupWorkbench({ evidence, onImport, plan, onPlanChange, prefli
       <div className="backup-actions">
         <button className="tool" type="button" disabled={busy} onClick={() => planInput.current?.click()}><Upload size={15} />{plan.text ? "Replace plan" : "Attach plan"}</button>
         <button className="tool" type="button" disabled={busy} onClick={() => bundleInput.current?.click()}><FileArchive size={15} />Import backup bundle</button>
-        <button className="tool" type="button" disabled={!fresh || busy} onClick={() => void exportBundle()}><Download size={15} />Export backup bundle</button>
+        <button className="tool" type="button" disabled={!fresh || busy || preflightBusy || (preflight.text !== "" && !freshPreflight)} onClick={() => void exportBundle()}><Download size={15} />Export backup bundle</button>
         <button className="icon-button" type="button" disabled={!plan.text || busy} title="Download original restore plan" aria-label="Download original restore plan" onClick={() => download("nostekon.restore-plan.json", plan.text, "application/json")}><Download size={15} /></button>
         <button className="icon-button" type="button" disabled={!fresh || busy} title="Download independent backup review" aria-label="Download independent backup review" onClick={() => fresh && download("nostekon.backup-review.json", JSON.stringify(fresh, null, 2) + "\n", "application/json")}><Download size={15} /></button>
         <button className="icon-button" type="button" disabled={!plan.text || busy} title="Remove restore plan" aria-label="Remove restore plan" onClick={() => { setError(""); onPlanChange({ text: "", name: "" }); }}><Trash2 size={15} /></button>

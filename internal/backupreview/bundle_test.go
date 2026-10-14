@@ -71,6 +71,15 @@ func TestBundlePreservesOriginalsAndReevaluatesCachedReview(t *testing.T) {
 	if err != nil || !imported.Review.Passed || imported.Review.Provenance.Status != "unverified" {
 		t.Fatalf("cached receipt trusted: %v", err)
 	}
+	_, preflightData := preflightFixture(t, true)
+	archiveV2, err := BundleWithPreflight(planData, evidenceData, preflightData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	importedV2, err := ReadBundle(archiveV2)
+	if err != nil || !bytes.Equal(importedV2.Preflight, preflightData) || importedV2.PreflightReview == nil || !importedV2.PreflightReview.Passed {
+		t.Fatalf("v2 preflight bundle round-trip failed: %+v %v", importedV2, err)
+	}
 }
 
 func TestBundleAdmission(t *testing.T) {
