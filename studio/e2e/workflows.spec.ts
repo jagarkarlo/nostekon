@@ -444,6 +444,47 @@ for (const width of [390, 1440]) {
     await expect(gate).toContainText("Incomplete");
     await expect(gate).toContainText("Matches");
     await expect(page.getByRole("button", { name: "Export backup bundle", exact: true })).toBeEnabled();
+    const preflightObject = {
+      apiVersion: "nostekon/backup-preflight/v1alpha1",
+      kind: "PostgreSQLBackupPreflight",
+      passed: true,
+      backupMatches: true,
+      backup: { sha256: "6d9a0a2794de72ac5c986ccbfa9487c2d7c6a2e2935b27cb0916bac3bf092c50", bytes: 3323 },
+      planSHA256: expected.planSHA256,
+      imageId: "sha256:2698c2096ca78a41ae7477580afb30fe36d5368564511b2ea593dbfb26401fdd",
+      requestedLevel: "V4",
+      checks: [
+        { name: "backup-plan-binding", passed: true, detail: "Frozen archive checksum and size match the plan" },
+        { name: "snapshot-count-coverage", passed: true, detail: "At least one table count is declared" },
+        { name: "local-linux-daemon", passed: true, detail: "Local Linux Docker daemon on a supported native architecture" },
+        { name: "daemon-resource-floor", passed: true, detail: "At least 512 MiB and one CPU advertised; free capacity untested" },
+        { name: "native-pinned-image", passed: true, detail: "Exact cached Linux image matches native daemon architecture" },
+      ],
+      limitations: [
+        "Technical prerequisites only; not approval, sanitization or dedicated-host confirmation",
+        "Header/byte binding only; full archive validity and restore success untested",
+        "No restore ran; capture authenticity, incident RTO and acknowledged-write RPO unmeasured",
+      ],
+    };
+    const preflightBuffer = Buffer.from(JSON.stringify(preflightObject, null, 2) + "\n");
+    await page.getByTestId("backup-preflight-input").setInputFiles({ name: "orders-preflight.json", mimeType: "application/json", buffer: preflightBuffer });
+    const preflightGate = page.getByRole("status", { name: "Backup preflight gate" });
+    await expect(preflightGate).toContainText("Ready");
+    await expect(preflightGate).toContainText("Matches");
+    await expect(preflightGate).toContainText("Metadata-only preflight · no restore ran");
+    const preflightOriginalDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download original backup preflight", exact: true }).click();
+    expect(await readFile((await (await preflightOriginalDownload).path())!)).toEqual(preflightBuffer);
+    const blockedPreflight = {
+      ...preflightObject,
+      passed: false,
+      checks: preflightObject.checks.map(check => check.name === "native-pinned-image" ? { ...check, passed: false, detail: "Pinned image unavailable or metadata query failed; no image pulled" } : check),
+    };
+    await page.getByTestId("backup-preflight-input").setInputFiles({ name: "blocked-preflight.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(blockedPreflight)) });
+    await expect(preflightGate).toContainText("Blocked");
+    await expect(preflightGate).toContainText("native-pinned-image");
+    await page.getByRole("button", { name: "Remove backup preflight", exact: true }).click();
+    await expect(preflightGate).toHaveCount(0);
   });
 
   test(`grouped footer has working product, source, docs and legal destinations at ${width}px`, async ({ page }, testInfo) => {

@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { request } from "./api";
-import { exportBackupBundle, importBackupBundle, isBackupReview, readOriginalJSON, reviewBackup } from "./backupReview";
+import { exportBackupBundle, importBackupBundle, isBackupReview, isPreflightReview, readOriginalJSON, reviewBackup, reviewBackupPreflight } from "./backupReview";
 
 vi.mock("./api", () => ({ request: vi.fn() }));
 const review = {
@@ -9,6 +9,15 @@ const review = {
   planSHA256: "a".repeat(64), planFileSHA256: "b".repeat(64), evidenceSHA256: "c".repeat(64),
   provenance: { status: "unverified" }, issues: [],
   report: { name: "measured-failure", verdict: "failed", levels: [], findings: [] },
+};
+const preflightReview = {
+  apiVersion: "nostekon/preflight-review/v1alpha1", kind: "PostgreSQLPreflightReview",
+  passed: true, planMatches: true, backupMatches: true,
+  planSHA256: "a".repeat(64), planFileSHA256: "b".repeat(64), preflightSHA256: "c".repeat(64), observedPlanSHA256: "a".repeat(64),
+  observedBackup: { sha256: "d".repeat(64), bytes: 3323 }, observedImageId: "sha256:" + "e".repeat(64),
+  requestedLevel: "V4",
+  checks: [{ name: "backup-plan-binding", passed: true, detail: "Frozen archive checksum and size match the plan" }],
+  limitations: ["l1", "l2", "l3"], issues: [],
 };
 beforeEach(() => vi.clearAllMocks());
 
@@ -46,4 +55,17 @@ it("reads exact valid UTF-8 originals and rejects lossy file decoding", async ()
   expect(await readOriginalJSON(new File(['{ "value": "č" }\r\n'], "run.json"), 100)).toBe('{ "value": "č" }\r\n');
   await expect(readOriginalJSON(new File([new Uint8Array([123, 255, 125])], "bad.json"), 100)).rejects.toThrow(/UTF-8/);
   expect(await readOriginalJSON(new File([new Uint8Array([239, 187, 191, 123, 125])], "bom.json"), 100)).toBe("\uFEFF{}");
+});
+
+it("validates backup preflight reviews and rejects contradictory or oversized payloads", async () => {
+  expect(isPreflightReview(preflightReview)).toBe(true);
+  for (const changed of [
+    { ...preflightReview, passed: true, issues: ["blocked"] },
+    { ...preflightReview, passed: true, planMatches: false },
+    { ...preflightReview, observedImageId: "postgres:16.8" },
+    { ...preflightReview, limitations: ["short"] },
+  ]) expect(isPreflightReview(changed)).toBe(false);
+  vi.mocked(request).mockResolvedValue(new Response(JSON.stringify(preflightReview)));
+  expect(await reviewBackupPreflight('{"kind":"PostgreSQLRestorePlan"}', '{"kind":"PostgreSQLBackupPreflight"}')).toEqual(preflightReview);
+  await expect(reviewBackupPreflight("{}", " ".repeat(16385))).rejects.toThrow(/16 KiB/);
 });

@@ -20,6 +20,45 @@ export interface BackupReview {
   issues: string[];
 }
 
+export interface PreflightCheck {
+  name: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface PreflightReview {
+  apiVersion: "nostekon/preflight-review/v1alpha1";
+  kind: "PostgreSQLPreflightReview";
+  passed: boolean;
+  planMatches: boolean;
+  backupMatches: boolean;
+  planSHA256: string;
+  planFileSHA256: string;
+  preflightSHA256: string;
+  observedPlanSHA256: string;
+  observedBackup: { sha256: string; bytes: number };
+  observedImageId: string;
+  requestedLevel: "V2" | "V3" | "V4";
+  checks: PreflightCheck[];
+  limitations: string[];
+  issues: string[];
+}
+
+export function isPreflightReview(value: unknown): value is PreflightReview {
+  if (!value || typeof value !== "object") return false;
+  const review = value as Partial<PreflightReview>;
+  return review.apiVersion === "nostekon/preflight-review/v1alpha1" && review.kind === "PostgreSQLPreflightReview"
+    && typeof review.passed === "boolean" && typeof review.planMatches === "boolean" && typeof review.backupMatches === "boolean"
+    && [review.planSHA256, review.planFileSHA256, review.preflightSHA256, review.observedPlanSHA256, review.observedBackup?.sha256].every(hash => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash))
+    && typeof review.observedBackup?.bytes === "number" && Number.isInteger(review.observedBackup.bytes) && review.observedBackup.bytes >= 5
+    && typeof review.observedImageId === "string" && /^sha256:[a-f0-9]{64}$/.test(review.observedImageId)
+    && ["V2", "V3", "V4"].includes(review.requestedLevel ?? "")
+    && Array.isArray(review.checks) && review.checks.length > 0 && review.checks.every(check => check && typeof check.name === "string" && typeof check.passed === "boolean" && typeof check.detail === "string")
+    && Array.isArray(review.limitations) && review.limitations.length >= 3 && review.limitations.every(text => typeof text === "string")
+    && Array.isArray(review.issues) && review.issues.every(issue => typeof issue === "string")
+    && (!review.passed || review.planMatches && review.backupMatches && review.issues.length === 0 && review.checks.every(check => check.passed));
+}
+
 export function isBackupReview(value: unknown): value is BackupReview {
   if (!value || typeof value !== "object") return false;
   const review = value as Partial<BackupReview>;
@@ -50,6 +89,14 @@ export async function reviewBackup(plan: string, evidence: string): Promise<Back
   boundOriginals(plan, evidence);
   const result = await post("/api/v1/backups/review", { plan, evidence });
   if (!isBackupReview(result)) throw new Error("Unsupported independent backup review response.");
+  return result;
+}
+
+export async function reviewBackupPreflight(plan: string, preflight: string): Promise<PreflightReview> {
+  if (!plan || new TextEncoder().encode(plan).length > MAX_PLAN_BYTES) throw new Error("Restore plan must be nonempty and within 16 KiB.");
+  if (!preflight || new TextEncoder().encode(preflight).length > MAX_PLAN_BYTES) throw new Error("Backup preflight must be nonempty and within 16 KiB.");
+  const result = await post("/api/v1/backups/preflight", { plan, preflight });
+  if (!isPreflightReview(result)) throw new Error("Unsupported backup preflight review response.");
   return result;
 }
 

@@ -110,6 +110,19 @@ or authorize data handling. `requestedLevel` is the plan's requested depth, **no
 an achieved recovery verdict**. Even an intentionally wrong count can pass
 preflight. The restore and independent gate must still measure and review it.
 
+You can also gate the recorded preflight JSON offline against its restore plan in
+Go or Studio before starting the restore:
+
+```bash
+go run ./cmd/nostekon-report --backup-plan ./plans/orders-plan.json \
+  --backup-preflight ./evidence/orders-preflight.json
+```
+
+In Studio, open **Plan review**, attach the restore plan, and attach the
+preflight JSON under **Host preflight**. The shared Go engine verifies canonical
+plan identity, archive byte binding, pinned image ID, requested depth and host
+prerequisite checks without contacting Docker.
+
 After passing preflight **and obtaining the approvals below**, execute exactly
 the reviewed settings:
 
