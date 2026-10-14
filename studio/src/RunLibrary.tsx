@@ -8,8 +8,8 @@ import { samples } from "./samples";
 import { request } from "./api";
 import { createRunBackup, MAX_RUN_BACKUP_BYTES, readRunBackup } from "./runBackup";
 import type { OriginalRun } from "./runBackup";
-import { sortRuns } from "./runHistory";
-import type { HistorySort } from "./runHistory";
+import { filterRuns, sortRuns } from "./runHistory";
+import type { AttachmentFilter, HistorySort } from "./runHistory";
 
 export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: string, attestation?: string, backupPlan?: string) => void }) {
   const [runs, setRuns] = useState<SavedRun[]>([]);
@@ -18,6 +18,7 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState<HistorySort>("newest");
+  const [attachment, setAttachment] = useState<AttachmentFilter>("all");
   const [exampleFilter, setExampleFilter] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [compare, setCompare] = useState(false);
@@ -98,8 +99,8 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
     finally { setDeleting(false); }
   }
 
-  const matching = sortRuns(runs.filter((run) => (filter === "all" || run.report.verdict === filter) &&
-    `${run.report.name} ${run.report.scenario ?? ""}`.toLowerCase().includes(search.toLowerCase())), sort);
+  const matching = sortRuns(filterRuns(runs, { query: search, verdict: filter, attachment }), sort);
+  const filtersActive = !!search.trim() || filter !== "all" || attachment !== "all";
   const compared = selected.map((id) => runs.find((run) => run.id === id)).filter((run): run is SavedRun => !!run);
   const exampleCounts = { all: samples.length, recorded: samples.filter(sample => sample.recorded).length, synthetic: samples.filter(sample => !sample.recorded).length };
   const visibleExamples = samples.filter(sample => exampleFilter === "all" || sample.recorded === (exampleFilter === "recorded"));
@@ -145,6 +146,10 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
         <select aria-label="Sort saved runs" value={sort} onChange={event => setSort(event.target.value as HistorySort)}>
           <option value="newest">Newest saved</option><option value="oldest">Oldest saved</option><option value="name">Run name</option>
         </select>
+        <select aria-label="Filter attachments" value={attachment} onChange={event => setAttachment(event.target.value as AttachmentFilter)}>
+          <option value="all">All attachments</option><option value="plan">Restore plan attached</option><option value="attestation">Attestation attached</option><option value="none">No attachments</option>
+        </select>
+        {filtersActive && <button type="button" className="icon-button" aria-label="Clear run filters" title="Clear run filters" onClick={() => { setSearch(""); setFilter("all"); setAttachment("all"); }}><X size={15} /></button>}
         <button type="button" className="tool compare-action" disabled={selected.length !== 2} onClick={() => setCompare(!compare)}><GitCompareArrows size={15} /> {compare ? "Close comparison" : `Compare (${selected.length}/2)`}</button>
         </>}
       </div>
