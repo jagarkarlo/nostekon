@@ -8,7 +8,7 @@ import { samples } from "./samples";
 import { request } from "./api";
 import { createRunBackup, MAX_RUN_BACKUP_BYTES, readRunBackup } from "./runBackup";
 import type { OriginalRun } from "./runBackup";
-import { comparisonWarnings, filterRuns, sortRuns } from "./runHistory";
+import { comparisonWarnings, filterRuns, selectedRuns, sortRuns } from "./runHistory";
 import type { AttachmentFilter, HistorySort } from "./runHistory";
 
 export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: string, attestation?: string, backupPlan?: string) => void }) {
@@ -49,9 +49,12 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
     if (pendingRestore) restoreDialog.current?.showModal(); else restoreDialog.current?.close();
   }, [pendingRestore]);
 
-  async function exportBackup() {
+  async function exportBackup(onlySelected = false) {
     setBackupBusy(true); setError(""); setBackupResult("");
-    try { downloadOriginal("nostekon-runs.backup.json", await createRunBackup(await listRuns())); }
+    try {
+      const current = await listRuns();
+      downloadOriginal(onlySelected ? "nostekon-selected-runs.backup.json" : "nostekon-runs.backup.json", await createRunBackup(onlySelected ? selectedRuns(current, selected) : current));
+    }
     catch (reason) { setError(message(reason)); }
     finally { setBackupBusy(false); }
   }
@@ -150,16 +153,18 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
           <option value="all">All attachments</option><option value="plan">Restore plan attached</option><option value="attestation">Attestation attached</option><option value="none">No attachments</option>
         </select>
         {filtersActive && <button type="button" className="icon-button" aria-label="Clear run filters" title="Clear run filters" onClick={() => { setSearch(""); setFilter("all"); setAttachment("all"); }}><X size={15} /></button>}
-        <button type="button" className="tool compare-action" disabled={selected.length !== 2} onClick={() => setCompare(!compare)}><GitCompareArrows size={15} /> {compare ? "Close comparison" : `Compare (${selected.length}/2)`}</button>
+        <label className="history-selection"><input type="checkbox" aria-label="Select visible saved runs" checked={matching.length > 0 && matching.every(run => selected.includes(run.id))} disabled={matching.length === 0} onChange={event => { setCompare(false); setSelected(current => event.target.checked ? [...new Set([...current, ...matching.map(run => run.id)])] : current.filter(id => !matching.some(run => run.id === id))); }} />Visible runs</label>
+        <button type="button" className="tool compare-action" disabled={selected.length !== 2} onClick={() => setCompare(!compare)}><GitCompareArrows size={15} /> {compare ? "Close comparison" : selected.length > 2 ? "Compare two runs" : `Compare (${selected.length}/2)`}</button>
+        {selected.length > 0 && <><output aria-label="Selected saved runs">{selected.length} selected</output><button type="button" className="icon-button" disabled={backupBusy} aria-label="Back up selected runs" title="Back up selected run originals" onClick={() => void exportBackup(true)}><Archive size={17} /></button><button type="button" className="icon-button" aria-label="Clear selected runs" title="Clear selected runs" onClick={() => { setSelected([]); setCompare(false); }}><X size={15} /></button></>}
         </>}
       </div>
       {loading ? <p className="library-empty" role="status">Loading saved runs...</p> : matching.length === 0 ? <div className="library-empty">
         <FileJson size={25} /><h3>{runs.length ? "No matching runs" : "No saved runs yet"}</h3>
         {!runs.length && <button type="button" className="tool" onClick={() => fileInput.current?.click()}>Import a DrillRun <ArrowRight size={15} /></button>}
       </div> : <div className="table-scroll"><table className="runs-table">
-        <thead><tr><th aria-label="Comparison selection" /><th>Run</th><th>Evidence</th><th>Verdict</th><th>Depth</th><th>Recovery time</th><th>Data loss</th><th aria-label="Actions" /></tr></thead>
+        <thead><tr><th aria-label="Run selection" /><th>Run</th><th>Evidence</th><th>Verdict</th><th>Depth</th><th>Recovery time</th><th>Data loss</th><th aria-label="Actions" /></tr></thead>
         <tbody>{matching.map((run) => <tr key={run.id}>
-          <td><input type="checkbox" aria-label={`Compare ${run.report.name}`} checked={selected.includes(run.id)} disabled={selected.length === 2 && !selected.includes(run.id)} onChange={(event) => { setCompare(false); setSelected(event.target.checked ? [...selected, run.id] : selected.filter((id) => id !== run.id)); }} /></td>
+          <td><input type="checkbox" aria-label={`Select ${run.report.name}`} checked={selected.includes(run.id)} onChange={(event) => { setCompare(false); setSelected(event.target.checked ? [...selected, run.id] : selected.filter((id) => id !== run.id)); }} /></td>
           <td><button type="button" className="run-name" onClick={() => onOpen(run.source, run.sampleId, run.attestation, run.backupPlan)}>{run.report.name}</button><small>{run.report.scenario ?? "Unspecified scenario"}</small><small>{Number.isFinite(new Date(run.savedAt).getTime()) ? <>Saved <time dateTime={new Date(run.savedAt).toISOString()}>{new Date(run.savedAt).toLocaleString()}</time></> : "Saved time unavailable"}</small></td>
           <td data-label="Evidence"><span className="evidence-kind">{evidenceLabel(run.sampleId)}</span>{run.attestation && <small className="attachment-label"><Paperclip size={13} aria-hidden="true" /> Attestation attached</small>}{run.backupPlan && <small className="attachment-label"><FileJson size={13} aria-hidden="true" /> Restore plan attached</small>}</td>
           <td data-label="Verdict"><span className={`verdict-tag ${run.report.verdict}`}>{run.report.verdict}</span></td>

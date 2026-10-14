@@ -4,6 +4,17 @@ import type { Report } from "./report";
 export type HistorySort = "newest" | "oldest" | "name";
 export type AttachmentFilter = "all" | "plan" | "attestation" | "none";
 
+export function selectedRuns(runs: readonly SavedRun[], identities: readonly string[]): SavedRun[] {
+  if (!identities.length) throw new Error("Select at least one saved run.");
+  if (new Set(identities).size !== identities.length) throw new Error("Duplicate run selection.");
+  const available = new Map(runs.map(run => [run.id, run]));
+  return identities.map(identity => {
+    const run = available.get(identity);
+    if (!run) throw new Error("A selected run is no longer available. Refresh the library before exporting.");
+    return run;
+  });
+}
+
 export function comparisonWarnings(baseline: Report, candidate: Report): string[] {
   const warnings: string[] = [];
   if (!baseline.scenario || baseline.scenario !== candidate.scenario) warnings.push("Different or unknown scenarios. Timing is not a like-for-like comparison.");

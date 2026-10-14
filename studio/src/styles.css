@@ -395,6 +395,8 @@ button.finding:hover { filter: brightness(1.12); }
 .run-search { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink-3); }
 .run-search input { width: 150px; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 13px; }
 .run-search:focus-within { outline: 2px solid var(--accent); }
+.history-selection { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; color: var(--ink-2); font-size: 13px; white-space: nowrap; }
+.history-selection input { width: 16px; height: 16px; accent-color: var(--accent); }
 .section-toolbar select { min-height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); font-size: 13px; }
 .table-scroll { overflow-x: auto; max-width: 100%; }
 .runs-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comparisonWarnings, filterRuns, sortRuns } from "./runHistory";
+import { comparisonWarnings, filterRuns, selectedRuns, sortRuns } from "./runHistory";
 import type { SavedRun } from "./runStore";
 
 function saved(id: string, name: string, savedAt: number): SavedRun {
@@ -18,6 +18,22 @@ describe("saved-run history ordering", () => {
     const runs = [saved("b", "Run 10", 10), saved("z", "run 2", 10), saved("a", "Run 2", 10)];
     expect(sortRuns(runs, "name").map(run => run.id)).toEqual(["a", "z", "b"]);
     expect(sortRuns(runs, "newest").map(run => run.id)).toEqual(["a", "b", "z"]);
+  });
+});
+
+describe("selected-original exports", () => {
+  it("keeps selection order and exact originals without changing stored runs", () => {
+    const first = { ...saved("first", "First", 10), source: '{ "original": 1 }\n', backupPlan: '{ "plan": true }\n' };
+    const second = { ...saved("second", "Second", 20), attestation: '{ "signature": "unchecked" }\n' };
+    expect(selectedRuns([first, second], ["second", "first"])).toEqual([second, first]);
+    expect(first.source).toBe('{ "original": 1 }\n');
+  });
+
+  it("fails closed for empty, duplicate or disappeared selections", () => {
+    const runs = [saved("first", "First", 10)];
+    expect(() => selectedRuns(runs, [])).toThrow("Select");
+    expect(() => selectedRuns(runs, ["first", "first"])).toThrow("Duplicate");
+    expect(() => selectedRuns(runs, ["missing"])).toThrow("no longer available");
   });
 });
 

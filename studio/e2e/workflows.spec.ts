@@ -93,6 +93,59 @@ for (const width of [390, 1440]) {
     await expect(page.getByRole("heading", { name: "Validation profiles", exact: true })).toBeVisible();
   });
 
+  test(`saved history sorting filters comparison and selected originals at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const template = JSON.parse(await readFile(new URL("../../examples/runs/k3d-postgresql.run.json", import.meta.url), "utf8"));
+    const originals = new Map<string, string>();
+    const reportURL = process.env.NOSTEKON_APP_URL ? "/#/report" : "/demo/#/report";
+    await page.goto(reportURL);
+    for (const name of ["history-zulu", "history-alpha", "history-middle"]) {
+      const original = JSON.stringify({ ...template, metadata: { ...template.metadata, name } });
+      originals.set(name, original);
+      await page.getByTestId("evidence-input").setInputFiles({ name: `${name}.json`, mimeType: "application/json", buffer: Buffer.from(original) });
+      await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+      await page.getByRole("button", { name: "Save run", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
+    }
+    await page.getByRole("link", { name: "Runs", exact: true }).click();
+    const rows = page.locator(".saved-runs tbody tr");
+    await expect(rows).toHaveCount(3);
+    await expect(rows.locator("time")).toHaveCount(3);
+    await expect(rows.locator(".run-name")).toHaveText(["history-middle", "history-alpha", "history-zulu"]);
+    await page.getByRole("combobox", { name: "Sort saved runs" }).selectOption("oldest");
+    await expect(rows.locator(".run-name")).toHaveText(["history-zulu", "history-alpha", "history-middle"]);
+    await page.getByRole("combobox", { name: "Sort saved runs" }).selectOption("name");
+    await expect(rows.locator(".run-name")).toHaveText(["history-alpha", "history-middle", "history-zulu"]);
+    await page.getByRole("searchbox", { name: "Search runs" }).fill(" HISTORY alpha ");
+    await expect(rows).toHaveCount(1);
+    await page.getByRole("combobox", { name: "Filter attachments" }).selectOption("plan");
+    await expect(page.getByRole("heading", { name: "No matching runs" })).toBeVisible();
+    await page.getByRole("button", { name: "Clear run filters" }).click();
+    await expect(rows).toHaveCount(3);
+    await page.getByRole("checkbox", { name: "Select visible saved runs" }).check();
+    await expect(page.getByRole("status", { name: "Selected saved runs" })).toHaveText("3 selected");
+    await expect(page.getByRole("button", { name: "Compare two runs", exact: true })).toBeDisabled();
+    await page.getByRole("checkbox", { name: "Select history-middle", exact: true }).uncheck();
+    await page.getByRole("button", { name: "Compare (2/2)", exact: true }).click();
+    const comparison = page.getByRole("region", { name: "Run comparison" });
+    await expect(comparison.getByRole("columnheader").nth(1)).toContainText("history-alpha");
+    await expect(comparison).toContainText("Acknowledged-write evidence is missing");
+    await expect(comparison.getByRole("row").filter({ hasText: "Acknowledged writes lost" }).getByRole("cell")).toHaveText(["Unmeasured", "Unmeasured"]);
+    await page.getByRole("button", { name: "Swap baseline and candidate" }).click();
+    await expect(comparison.getByRole("columnheader").nth(1)).toContainText("history-zulu");
+    const downloading = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Back up selected runs" }).click();
+    const download = await downloading;
+    expect(download.suggestedFilename()).toBe("nostekon-selected-runs.backup.json");
+    const backup = JSON.parse(await readFile((await download.path())!, "utf8"));
+    expect(backup.runs.map((run: { evidence: string }) => run.evidence)).toEqual([originals.get("history-zulu"), originals.get("history-alpha")]);
+    expect(backup.trustedKeys).toBeUndefined();
+    for (const run of backup.runs) expect(run.report).toBeUndefined();
+    await page.getByRole("button", { name: "Clear selected runs" }).click();
+    await expect(page.getByRole("region", { name: "Run comparison" })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+
   test(`calm workspace and browsable evidence at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto(process.env.NOSTEKON_APP_URL ? "/#/runs" : "/demo/#/runs");
@@ -1450,11 +1503,11 @@ test("saved evidence survives reload, compares and deletes", async ({ page }) =>
   await page.getByRole("link", { name: "Runs", exact: true }).click();
   await page.reload();
   await expect(page.locator(".runs-table tbody tr")).toHaveCount(2);
-  await page.getByRole("checkbox").nth(0).check();
-  await page.getByRole("checkbox").nth(1).check();
+  await page.locator(".saved-runs tbody").getByRole("checkbox").nth(0).check();
+  await page.locator(".saved-runs tbody").getByRole("checkbox").nth(1).check();
   await page.getByRole("button", { name: "Compare (2/2)" }).click();
   await expect(page.getByRole("region", { name: "Run comparison" })).toBeVisible();
-  await expect(page.getByText("Different scenarios or requested depths.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Different or unknown scenarios.", { exact: false })).toBeVisible();
   await page.getByRole("searchbox", { name: "Search runs" }).fill("no-such-run");
   await expect(page.getByRole("heading", { name: "No matching runs" })).toBeVisible();
   await page.getByRole("searchbox", { name: "Search runs" }).fill("");
@@ -1474,8 +1527,8 @@ test("run comparison exposes different recovery policies", async ({ page }, test
     await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
   }
   await page.getByRole("link", { name: "Runs", exact: true }).click();
-  await page.getByRole("checkbox").nth(0).check();
-  await page.getByRole("checkbox").nth(1).check();
+  await page.locator(".saved-runs tbody").getByRole("checkbox").nth(0).check();
+  await page.locator(".saved-runs tbody").getByRole("checkbox").nth(1).check();
   await page.getByRole("button", { name: "Compare (2/2)" }).click();
   const comparison = page.getByRole("region", { name: "Run comparison" });
   await expect(comparison).toContainText("Different recovery objectives. Verdicts use different policies.");
