@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterRuns, sortRuns } from "./runHistory";
+import { comparisonWarnings, filterRuns, sortRuns } from "./runHistory";
 import type { SavedRun } from "./runStore";
 
 function saved(id: string, name: string, savedAt: number): SavedRun {
@@ -18,6 +18,25 @@ describe("saved-run history ordering", () => {
     const runs = [saved("b", "Run 10", 10), saved("z", "run 2", 10), saved("a", "Run 2", 10)];
     expect(sortRuns(runs, "name").map(run => run.id)).toEqual(["a", "z", "b"]);
     expect(sortRuns(runs, "newest").map(run => run.id)).toEqual(["a", "b", "z"]);
+  });
+});
+
+describe("run comparison boundaries", () => {
+  it("does not treat unknown scenario or missing measurements as comparable", () => {
+    const report = saved("first", "First", 10).report;
+    expect(comparisonWarnings(report, report)).toEqual([
+      "Different or unknown scenarios. Timing is not a like-for-like comparison.",
+      "Recovery timing is missing from one or both runs.",
+      "Acknowledged-write evidence is missing from one or both runs.",
+    ]);
+  });
+
+  it("distinguishes requested depth from recovery policy differences", () => {
+    const baseline = { ...saved("first", "First", 10).report, scenario: "restore" };
+    const candidate = { ...baseline, requestedLevel: "V4", rto: { seconds: 3, objectiveSeconds: 5, met: true, uncoveredSeconds: 0, slowestPhase: "restore", phases: [], completedAt: "2026-10-14T07:00:00Z" } };
+    expect(comparisonWarnings(baseline, candidate)).toContain("Different requested verification depths.");
+    expect(comparisonWarnings(baseline, candidate)).toContain("Different recovery objectives. Verdicts use different policies.");
+    expect(comparisonWarnings(baseline, candidate)).not.toContain("Different or unknown scenarios. Timing is not a like-for-like comparison.");
   });
 });
 

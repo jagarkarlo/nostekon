@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowRight, ArrowUpRight, Database, Download, FileCheck2, FileJson, FlaskConical, GitCompareArrows, ListChecks, Paperclip, Search, Trash2, Upload, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowRight, ArrowRightLeft, ArrowUpRight, Database, Download, FileCheck2, FileJson, FlaskConical, GitCompareArrows, ListChecks, Paperclip, Search, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { formatDuration, isReport } from "./report";
 import type { Report } from "./report";
@@ -8,7 +8,7 @@ import { samples } from "./samples";
 import { request } from "./api";
 import { createRunBackup, MAX_RUN_BACKUP_BYTES, readRunBackup } from "./runBackup";
 import type { OriginalRun } from "./runBackup";
-import { filterRuns, sortRuns } from "./runHistory";
+import { comparisonWarnings, filterRuns, sortRuns } from "./runHistory";
 import type { AttachmentFilter, HistorySort } from "./runHistory";
 
 export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: string, attestation?: string, backupPlan?: string) => void }) {
@@ -170,7 +170,7 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
         </tr>)}</tbody>
       </table></div>}
     </section>
-    {compare && compared.length === 2 && <RunComparison runs={compared} onClose={() => setCompare(false)} />}
+    {compare && compared.length === 2 && <RunComparison runs={compared} onClose={() => setCompare(false)} onSwap={() => setSelected(current => [...current].reverse())} />}
     <section className="sample-section" aria-labelledby="examples-heading">
       <div className="section-toolbar"><h2 id="examples-heading">Example evidence</h2><div className="example-filter" role="group" aria-label="Example source">
         {([{ id: "all", label: "All examples" }, { id: "recorded", label: "Recorded lab" }, { id: "synthetic", label: "Synthetic" }] as const).map(option => <button type="button" key={option.id} aria-label={option.label} aria-pressed={exampleFilter === option.id} onClick={() => setExampleFilter(option.id)}>{option.label}<span aria-hidden="true">{exampleCounts[option.id]}</span></button>)}
@@ -191,26 +191,29 @@ export function RunLibrary({ onOpen }: { onOpen: (source: string, sampleId: stri
   </main>;
 }
 
-function RunComparison({ runs, onClose }: { runs: SavedRun[]; onClose: () => void }) {
+function RunComparison({ runs, onClose, onSwap }: { runs: SavedRun[]; onClose: () => void; onSwap: () => void }) {
   const [baseline, candidate] = runs.map((run) => run.report);
-  const sameScenario = !!baseline.scenario && baseline.scenario === candidate.scenario && baseline.requestedLevel === candidate.requestedLevel;
-  const differentObjectives = (baseline.rto?.objectiveSeconds ?? null) !== (candidate.rto?.objectiveSeconds ?? null)
-    || (baseline.rpo?.objectiveSeconds ?? null) !== (candidate.rpo?.objectiveSeconds ?? null);
   const rows = [
     ["Verdict", baseline.verdict, candidate.verdict],
+    ["Requested depth", baseline.requestedLevel ?? "Unknown", candidate.requestedLevel ?? "Unknown"],
     ["Depth reached", baseline.deepestPassed ?? "None", candidate.deepestPassed ?? "None"],
     ["RTO objective", formatDuration(baseline.rto?.objectiveSeconds), formatDuration(candidate.rto?.objectiveSeconds)],
     ["Recovery time", formatDuration(baseline.rto?.seconds), formatDuration(candidate.rto?.seconds)],
     ["RPO objective", formatDuration(baseline.rpo?.objectiveSeconds), formatDuration(candidate.rpo?.objectiveSeconds)],
     ["Data loss window", formatDuration(baseline.rpo?.seconds), formatDuration(candidate.rpo?.seconds)],
+    ["Acknowledged writes", baseline.rpo?.acknowledged ?? "Unmeasured", candidate.rpo?.acknowledged ?? "Unmeasured"],
+    ["Recovered writes", baseline.rpo?.recovered ?? "Unmeasured", candidate.rpo?.recovered ?? "Unmeasured"],
     ["Acknowledged writes lost", baseline.rpo?.lost ?? "Unmeasured", candidate.rpo?.lost ?? "Unmeasured"],
+    ["Ledger holes", baseline.rpo?.holes ?? "Unmeasured", candidate.rpo?.holes ?? "Unmeasured"],
+    ["Unexpected writes", baseline.rpo?.unexpected ?? "Unmeasured", candidate.rpo?.unexpected ?? "Unmeasured"],
+    ["Ledger consistent", baseline.rpo ? String(baseline.rpo.consistent) : "Unmeasured", candidate.rpo ? String(candidate.rpo.consistent) : "Unmeasured"],
+    ["Ledger resolution", formatDuration(baseline.rpo?.resolutionSeconds), formatDuration(candidate.rpo?.resolutionSeconds)],
     ...["V0", "V1", "V2", "V3", "V4"].map((id) => [id, baseline.levels.find((level) => level.id === id)?.status ?? "not-checked", candidate.levels.find((level) => level.id === id)?.status ?? "not-checked"]),
   ];
   return <section className="run-comparison" aria-label="Run comparison">
-    <div className="section-toolbar"><h2>Run comparison</h2><button className="icon-button" type="button" aria-label="Close comparison" title="Close comparison" onClick={onClose}><X size={17} /></button></div>
-    {!sameScenario && <p className="comparison-notice">Different scenarios or requested depths. Timing is not a like-for-like comparison.</p>}
-    {differentObjectives && <p className="comparison-notice">Different recovery objectives. Verdicts use different policies.</p>}
-    <div className="table-scroll"><table className="runs-table comparison-table"><thead><tr><th>Measure</th>{runs.map((run) => <th key={run.id}>{run.report.name}<small>{evidenceLabel(run.sampleId)}</small></th>)}</tr></thead><tbody>{rows.map(([label, first, second]) => <tr key={label}><th>{label}</th><td>{first}</td><td className={first !== second ? "changed" : ""}>{second}</td></tr>)}</tbody></table></div>
+    <div className="section-toolbar"><h2>Run comparison</h2><button className="icon-button" type="button" aria-label="Swap baseline and candidate" title="Swap baseline and candidate" onClick={onSwap}><ArrowRightLeft size={17} /></button><button className="icon-button" type="button" aria-label="Close comparison" title="Close comparison" onClick={onClose}><X size={17} /></button></div>
+    {comparisonWarnings(baseline, candidate).map(warning => <p key={warning} className="comparison-notice">{warning}</p>)}
+    <div className="table-scroll"><table className="runs-table comparison-table"><thead><tr><th>Measure</th>{runs.map((run, index) => <th key={run.id}>{index === 0 ? "Baseline" : "Candidate"}<small>{run.report.name}</small><small>{evidenceLabel(run.sampleId)}</small></th>)}</tr></thead><tbody>{rows.map(([label, first, second]) => <tr key={label}><th>{label}</th><td>{first}</td><td className={first !== second ? "changed" : ""}>{second}</td></tr>)}</tbody></table></div>
   </section>;
 }
 
