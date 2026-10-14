@@ -1,8 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-  <title>Nostekon stepping-stones mark</title>
-  <rect x="6" y="6" width="22" height="84" rx="4" fill="#377CEF"/>
-  <rect x="30" y="20" width="15" height="15" rx="3" fill="#2E84D7"/>
-  <rect x="41" y="40.5" width="15" height="15" rx="3" fill="#258CC0"/>
-  <rect x="52" y="61" width="15" height="15" rx="3" fill="#1C94A8"/>
-  <rect x="68" y="6" width="22" height="84" rx="4" fill="#139C91"/>
+  <title>Nostekon core-vault mark</title>
+  <defs>
+    <linearGradient id="nostekon-vault-top" x1="12" y1="7" x2="84" y2="38" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#93C5FD"/>
+      <stop offset="100%" stop-color="#3B82F6"/>
+    </linearGradient>
+    <linearGradient id="nostekon-vault-left" x1="12" y1="34" x2="44" y2="89" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="nostekon-vault-right" x1="84" y1="34" x2="52" y2="89" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="nostekon-core-left" x1="31" y1="38" x2="48" y2="68" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6EE7B7"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+  </defs>
+  <path d="M48 7 L84 27.5 L70.5 35.2 L48 22.4 L25.5 35.2 L12 27.5 Z" fill="url(#nostekon-vault-top)"/>
+  <path d="M12 34.5 L25.5 42.2 V64.2 L44.5 75 V89 L12 70.5 Z" fill="url(#nostekon-vault-left)"/>
+  <path d="M84 34.5 L70.5 42.2 V64.2 L51.5 75 V89 L84 70.5 Z" fill="url(#nostekon-vault-right)"/>
+  <path d="M48 28.5 L65 38.2 L48 48 L31 38.2 Z" fill="#A7F3D0"/>
+  <path d="M31 38.2 L48 48 V67.5 L31 57.8 Z" fill="url(#nostekon-core-left)"/>
+  <path d="M65 38.2 L48 48 V67.5 L65 57.8 Z" fill="#059669"/>
 </svg>
