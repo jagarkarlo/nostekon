@@ -1,7 +1,8 @@
 import { ArrowRight, Download, FileArchive, LoaderCircle, Trash2 } from "lucide-react";
 import { strToU8, zipSync } from "fflate";
 import { useEffect, useRef, useState } from "react";
-import { parseSuite } from "./labSuite";
+import { parseSuite, sortSavedSuites } from "./labSuite";
+import type { SuiteHistorySort } from "./labSuite";
 import { deleteSuite, listSuites, SUITE_LIMIT, suiteSources } from "./runStore";
 import type { SavedSuite } from "./runStore";
 
@@ -11,6 +12,7 @@ export function SuiteHistory({ onOpen }: { onOpen: (suite: SavedSuite) => void }
   const [error, setError] = useState("");
   const [pendingDelete, setPendingDelete] = useState<SavedSuite | null>(null);
   const [working, setWorking] = useState(false);
+  const [sort, setSort] = useState<SuiteHistorySort>("newest");
   const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -54,15 +56,17 @@ export function SuiteHistory({ onOpen }: { onOpen: (suite: SavedSuite) => void }
   }
 
   return <section className="saved-runs" aria-labelledby="suite-history-heading">
-    <div className="section-toolbar"><h2 id="suite-history-heading">Saved suites <span>{suites.length} / {SUITE_LIMIT}</span></h2><span className="workspace-label">Local browser storage</span></div>
+    <div className="section-toolbar"><h2 id="suite-history-heading">Saved suites <span>{suites.length} / {SUITE_LIMIT}</span></h2><span className="workspace-label">Local browser storage</span>
+      {suites.length > 0 && <select aria-label="Sort saved suites" value={sort} onChange={event => setSort(event.target.value as SuiteHistorySort)}><option value="newest">Newest saved</option><option value="oldest">Oldest saved</option></select>}
+    </div>
     {error && <p className="banner bad" role="alert">{error}</p>}
     {loading ? <p className="library-empty" role="status"><LoaderCircle className="spin" size={18} /> Loading saved suites...</p> : suites.length === 0 ? <div className="library-empty"><FileArchive size={25} /><h3>{error ? "Suite history unavailable" : "No saved suites yet"}</h3></div> : <div className="table-scroll"><table className="runs-table suite-history-table">
       <thead><tr><th>Suite</th><th>Runner status</th><th>Cases recorded</th><th>Original files</th><th>Evidence</th><th aria-label="Actions" /></tr></thead>
-      <tbody>{suites.map(suite => {
+      <tbody>{sortSavedSuites(suites, sort).map(suite => {
         const summary = parseSuite(suite.files.find(file => file.name === "suite.json")!.source);
         const shortId = suite.id.slice(0, 12);
         return <tr key={suite.id}>
-          <th scope="row"><strong>PostgreSQL policy suite</strong><small className="mono">{shortId}</small></th>
+          <th scope="row"><strong>PostgreSQL policy suite</strong><small className="mono">{shortId}</small><small>{Number.isFinite(new Date(suite.savedAt).getTime()) ? <>Saved <time dateTime={new Date(suite.savedAt).toISOString()}>{new Date(suite.savedAt).toLocaleString()}</time></> : "Saved time unavailable"}</small></th>
           <td data-label="Runner status">{summary.status}</td>
           <td data-label="Cases recorded" className="mono">{summary.cases.length} / 3</td>
           <td data-label="Original files" className="mono">{suite.files.length}</td>

@@ -1,8 +1,22 @@
 import { Zip, ZipPassThrough, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { readEvidenceBundle } from "./evidenceBundle";
-import { createSuiteReview, evaluateSuite, parseSuite } from "./labSuite";
+import { createSuiteReview, evaluateSuite, parseSuite, sortSavedSuites } from "./labSuite";
 import type { Report } from "./report";
+import type { SavedSuite } from "./runStore";
+
+describe("suite history ordering", () => {
+  it("sorts saved timestamps with stable identity ties without changing snapshots", () => {
+    const suites: SavedSuite[] = [
+      { id: "c".repeat(64), savedAt: 20, files: [] },
+      { id: "b".repeat(64), savedAt: 10, files: [] },
+      { id: "a".repeat(64), savedAt: 20, files: [] },
+    ];
+    expect(sortSavedSuites(suites, "newest").map(suite => suite.id[0])).toEqual(["a", "c", "b"]);
+    expect(sortSavedSuites(suites, "oldest").map(suite => suite.id[0])).toEqual(["b", "a", "c"]);
+    expect(suites.map(suite => suite.id[0])).toEqual(["c", "b", "a"]);
+  });
+});
 
 const summary = {
   apiVersion: "nostekon/lab-suite/v1alpha1", kind: "LabSuiteResult", status: "passed", passed: true,

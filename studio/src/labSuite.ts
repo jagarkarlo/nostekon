@@ -1,4 +1,14 @@
 import type { Report, RPOResult } from "./report";
+import type { SavedSuite } from "./runStore";
+
+export type SuiteHistorySort = "newest" | "oldest";
+
+export function sortSavedSuites(suites: readonly SavedSuite[], order: SuiteHistorySort): SavedSuite[] {
+  return [...suites].sort((left, right) => {
+    const difference = order === "oldest" ? left.savedAt - right.savedAt : right.savedAt - left.savedAt;
+    return difference || left.id.localeCompare(right.id);
+  });
+}
 
 export type SuiteRPO = Pick<RPOResult, "acknowledged" | "recovered" | "lost" | "holes" | "unexpected" | "seconds"> & {
   objectiveSeconds: number;
