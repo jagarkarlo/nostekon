@@ -598,6 +598,29 @@ it. Reopening verifies the snapshot's content hash and evaluates the evidence
 again; a saved snapshot is not a cached passing review. Interrupted and failed
 captures can be retained, and their missing evidence is not filled in.
 
+The saved timestamp is the browser's last successful save time, not the capture
+time or a trusted attestation. Sort by **Newest saved** or **Oldest saved**;
+equal timestamps use the snapshot identity as a deterministic tie-breaker.
+Search matches all entered terms against the suite identity, runner status,
+case names and original filenames, without searching inside evidence content.
+The runner-status and capture filters combine with search. **Clear suite
+filters** resets those filters without changing the selected sort order.
+
+**Full captures** have all three cases declared in the summary and every
+declared case's original file present. **Partial captures** include shorter
+summaries and snapshots with a missing declared file. This is file coverage,
+not evidence agreement, authenticity or a passing suite gate. A full capture
+with runner status `failed` is still a failed runner claim; reopen the suite
+for a fresh independent gate result.
+
+Use **Inspect suite originals** to see the full snapshot identity, each original
+file's UTF-8 byte size and SHA-256, and absent policy-case files. Inspection
+first verifies the snapshot's identity against its stored originals. A failed
+integrity check blocks the inventory without deleting or repairing evidence;
+retain your original download and resolve the damaged browser copy explicitly.
+Matching checksums establish byte integrity, not capture authenticity or trusted
+operator identity. Close the inventory with its close control or Escape.
+
 Identical filenames and exact sources are deduplicated regardless of import
 order. At the 20-suite limit, an existing snapshot can still be saved again;
 new snapshots require an explicit deletion. No suite is silently evicted.
@@ -633,6 +656,13 @@ Suite snapshots were verified on 2026-10-08 in the installed app at 390px and
 partial captures, damaged-snapshot rejection, independent deletion and keyboard
 tabs. Version-one upgrades, quota rollback and concurrent final-slot saves
 were verified with IndexedDB tests.
+
+Saved-suite sorting, combined search/status/capture filters, empty results,
+exact-original inventory hashes and byte sizes, missing-file labels, keyboard
+dismissal and damaged-inventory rejection were verified on 2026-10-15 in both
+the browser/WASM demo and installed Go app at 390px and 1440px. Light/dark
+inventory and control layouts were checked. IndexedDB tests include an
+independent three-byte UTF-8 hash oracle and preservation of damaged snapshots.
 
 ### Ledger And Measurement Limits
 

@@ -127,6 +127,13 @@ library. Clearing browser storage deletes them; export evidence before doing
 so. The app has no authentication. Do not expose it on a public network; an
 authenticated TLS gateway is required before a shared deployment.
 
+Saved suites have their own 20-snapshot library with saved-time sorting, search,
+runner-status and full/partial capture filters, and integrity-checked original
+file inventories. Capture completeness and checksums do not imply a passing
+gate or authentic capture; reopening evaluates the originals again. See the
+[suite guide](site/src/content/docs/guides/k3d-isolated-restore.md) for storage,
+export and trust boundaries.
+
 If your network intercepts registry TLS, pass its trusted CA bundle as a
 build-only secret rather than disabling certificate verification:
 
