@@ -519,6 +519,10 @@ button.finding:hover { filter: brightness(1.12); }
 .suite-tabs { margin-bottom: 24px; }
 .suite-history-table { min-width: 750px; }
 .suite-history-table .suite-row-action { white-space: nowrap; }
+.suite-inventory { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 18px; }
+.suite-inventory li { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 8px; font-size: 13.5px; }
+.suite-inventory strong { overflow-wrap: anywhere; }
+.suite-inventory-dialog .backup-hashes dd { font-size: 13px; }
 .suite-table tbody th { width: 230px; border-bottom-color: var(--line-2); color: var(--ink); font-size: 13px; }
 .suite-table th, .suite-table td { padding-top: 22px; padding-bottom: 22px; }
 .suite-table td { white-space: nowrap; }
@@ -582,7 +586,7 @@ button.finding:hover { filter: brightness(1.12); }
   .suite-history-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .suite-history-table tbody { display: block; }
   .suite-history-table tbody tr { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; padding: 20px 0; border-top: 1px solid var(--line); }
-  .suite-history-table tbody th { grid-column: 1 / -1; padding: 0 110px 10px 0; border: 0; }
+  .suite-history-table tbody th { grid-column: 1 / -1; padding: 0 145px 10px 0; border: 0; }
   .suite-history-table td { padding: 8px 0; border: 0; white-space: normal; overflow-wrap: anywhere; }
   .suite-history-table td[data-label]::before { display: block; margin-bottom: 7px; color: var(--ink-2); font-family: "DM Sans", sans-serif; content: attr(data-label); }
   .suite-history-table td.suite-row-action { position: absolute; top: 16px; right: 0; padding: 0; }

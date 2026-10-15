@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteDB, openDB } from "idb";
-import { deleteRun, deleteSuite, evidenceLabel, listRuns, listSuites, RUN_LIMIT, saveRun, saveRuns, saveSuite, SUITE_LIMIT, suiteSources as reopenSuite } from "./runStore";
+import { deleteRun, deleteSuite, evidenceLabel, listRuns, listSuites, RUN_LIMIT, saveRun, saveRuns, saveSuite, SUITE_LIMIT, suiteInventory, suiteSources as reopenSuite } from "./runStore";
 import type { Report } from "./report";
 
 const report: Report = {
@@ -21,6 +21,25 @@ const suiteSummary = JSON.stringify({ apiVersion: "nostekon/lab-suite/v1alpha1",
 const suiteSources = new Map([["suite.json", suiteSummary + "\n"], ["zero-loss.drillrun.json", '{ "original": "suite case" }\n']]);
 
 describe("saved suite snapshots", () => {
+  it("inventories verified original UTF-8 bytes and marks absent case files", async () => {
+    const saved = await saveSuite(new Map([...suiteSources, ["zero-loss.drillrun.json", "\u00e9\n"]]));
+    const inventory = await suiteInventory(saved);
+    expect(inventory.find(file => file.name === "zero-loss.drillrun.json")).toEqual({
+      name: "zero-loss.drillrun.json", size: 3,
+      sha256: "edd3a863872a04239eb29ad4bc12fc892b3d4ae57cc7e786a3697816f8e141c2",
+    });
+    expect(inventory.filter(file => file.sha256 === null).map(file => file.name)).toEqual(["tail-loss.drillrun.json", "budget-loss.drillrun.json"]);
+    expect(inventory[0].name).toBe("suite.json");
+    expect((await reopenSuite(saved)).get("zero-loss.drillrun.json")).toBe("\u00e9\n");
+  });
+
+  it("refuses an inventory when the snapshot identity no longer matches", async () => {
+    const saved = await saveSuite(suiteSources);
+    const damaged = { ...saved, files: saved.files.map(file => file.name === "suite.json" ? file : { ...file, source: "changed" }) };
+    await expect(suiteInventory(damaged)).rejects.toThrow("integrity");
+    expect(await listSuites()).toHaveLength(1);
+  });
+
   it("preserves original grouping and bytes, deduplicates by all inputs and deletes without touching runs", async () => {
     const run = await saveRun("existing run", report);
     const saved = await saveSuite(suiteSources);

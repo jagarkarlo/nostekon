@@ -223,6 +223,24 @@ export async function suiteSources(suite: SavedSuite): Promise<Map<string, strin
   return new Map(suite.files.map(file => [file.name, file.source]));
 }
 
+export interface SuiteFileInventory { name: string; size: number | null; sha256: string | null }
+
+export async function suiteInventory(suite: SavedSuite): Promise<SuiteFileInventory[]> {
+  const sources = await suiteSources(suite);
+  const inventory: SuiteFileInventory[] = [];
+  for (const name of suiteNames) {
+    const source = sources.get(name);
+    if (source === undefined) {
+      inventory.push({ name, size: null, sha256: null });
+    } else {
+      const bytes = new TextEncoder().encode(source);
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      inventory.push({ name, size: bytes.length, sha256: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("") });
+    }
+  }
+  return inventory;
+}
+
 export function evidenceLabel(sampleId: string): string {
   return isRecordedSample(sampleId) ? "Recorded lab" : sampleId ? "Synthetic sample" : "Imported evidence";
 }

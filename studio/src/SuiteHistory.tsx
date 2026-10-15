@@ -1,10 +1,10 @@
-import { ArrowRight, Download, FileArchive, LoaderCircle, Search, Trash2, X } from "lucide-react";
+import { ArrowRight, Download, FileArchive, Files, LoaderCircle, Search, Trash2, X } from "lucide-react";
 import { strToU8, zipSync } from "fflate";
 import { useEffect, useRef, useState } from "react";
 import { filterSavedSuites, parseSuite, sortSavedSuites } from "./labSuite";
 import type { SuiteCaptureFilter, SuiteHistorySort, SuiteStatusFilter } from "./labSuite";
-import { deleteSuite, listSuites, SUITE_LIMIT, suiteSources } from "./runStore";
-import type { SavedSuite } from "./runStore";
+import { deleteSuite, listSuites, SUITE_LIMIT, suiteInventory, suiteSources } from "./runStore";
+import type { SavedSuite, SuiteFileInventory } from "./runStore";
 
 export function SuiteHistory({ onOpen }: { onOpen: (suite: SavedSuite) => void }) {
   const [suites, setSuites] = useState<SavedSuite[]>([]);
@@ -16,7 +16,9 @@ export function SuiteHistory({ onOpen }: { onOpen: (suite: SavedSuite) => void }
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<SuiteStatusFilter>("all");
   const [capture, setCapture] = useState<SuiteCaptureFilter>("all");
+  const [inventory, setInventory] = useState<{ suite: SavedSuite; files: SuiteFileInventory[] } | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+  const inventoryDialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -30,6 +32,19 @@ export function SuiteHistory({ onOpen }: { onOpen: (suite: SavedSuite) => void }
     if (pendingDelete) dialog.current?.showModal();
     else dialog.current?.close();
   }, [pendingDelete]);
+
+  useEffect(() => {
+    if (inventory) inventoryDialog.current?.showModal();
+    else inventoryDialog.current?.close();
+  }, [inventory]);
+
+  async function inspect(suite: SavedSuite) {
+    setWorking(true);
+    setError("");
+    try { setInventory({ suite, files: await suiteInventory(suite) }); }
+    catch (reason) { setError(message(reason)); }
+    finally { setWorking(false); }
+  }
 
   async function download(suite: SavedSuite) {
     setWorking(true);
@@ -85,6 +100,7 @@ export function SuiteHistory({ onOpen }: { onOpen: (suite: SavedSuite) => void }
           <td data-label="Original files" className="mono">{suite.files.length}</td>
           <td data-label="Evidence"><span className="evidence-kind">Imported · unverified</span></td>
           <td className="suite-row-action">
+            <button className="icon-button" type="button" title={`Inspect suite originals ${shortId}`} aria-label={`Inspect suite originals ${shortId}`} disabled={working} onClick={() => void inspect(suite)}><Files size={16} /></button>
             <button className="icon-button" type="button" title={`Reopen suite ${shortId}`} aria-label={`Reopen suite ${shortId}`} disabled={working} onClick={() => onOpen(suite)}><ArrowRight size={17} /></button>
             <button className="icon-button" type="button" title={`Download original suite files ${shortId}`} aria-label={`Download original suite files ${shortId}`} disabled={working} onClick={() => void download(suite)}><Download size={16} /></button>
             <button className="icon-button" type="button" title={`Delete suite ${shortId}`} aria-label={`Delete suite ${shortId}`} disabled={working} onClick={() => setPendingDelete(suite)}><Trash2 size={16} /></button>
@@ -92,6 +108,17 @@ export function SuiteHistory({ onOpen }: { onOpen: (suite: SavedSuite) => void }
         </tr>;
       })}</tbody>
     </table></div>}
+    <dialog ref={inventoryDialog} className="trust-dialog suite-inventory-dialog" aria-labelledby="suite-inventory-heading" onCancel={() => setInventory(null)}>
+      <div className="section-toolbar"><h2 id="suite-inventory-heading">Suite originals</h2><button className="icon-button" type="button" title="Close suite originals" aria-label="Close suite originals" onClick={() => setInventory(null)}><X size={17} /></button></div>
+      {inventory && <>
+        <p className="evidence-kind">Imported · unverified</p>
+        <dl className="backup-hashes"><div><dt>Suite identity</dt><dd className="mono">{inventory.suite.id}</dd></div></dl>
+        <ul className="suite-inventory">{inventory.files.map(file => <li key={file.name}>
+          <strong className="mono">{file.name}</strong><span>{file.size === null ? "Missing original" : `${file.size.toLocaleString()} bytes`}</span>
+          {file.sha256 !== null && <dl className="backup-hashes"><div><dt>SHA-256</dt><dd className="mono">{file.sha256}</dd></div></dl>}
+        </li>)}</ul>
+      </>}
+    </dialog>
     <dialog ref={dialog} className="delete-dialog" onCancel={() => setPendingDelete(null)}>
       <h2>Delete saved suite?</h2><p className="mono">{pendingDelete?.id.slice(0, 12)}</p><p>This removes only this browser's suite snapshot. Case runs remain saved.</p>
       <div className="library-actions"><button className="tool" type="button" disabled={working} onClick={() => setPendingDelete(null)}>Cancel</button><button className="primary danger" type="button" disabled={working} onClick={() => void remove()}><Trash2 size={15} /> {working ? "Deleting..." : "Delete suite"}</button></div>
