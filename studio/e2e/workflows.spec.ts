@@ -769,7 +769,7 @@ for (const width of [390, 1440]) {
     await page.getByRole("tab", { name: "Saved suites", exact: true }).click();
     await expect(page.getByRole("row", { name: /PostgreSQL policy suite/ })).toHaveCount(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    for (const name of [/Reopen suite/, /Download original suite files/, /Delete suite/]) {
+    for (const name of [/Inspect suite originals/, /Reopen suite/, /Download original suite files/, /Delete suite/]) {
       const bounds = await page.getByRole("button", { name }).boundingBox();
       expect(bounds).not.toBeNull();
       expect(bounds!.x).toBeGreaterThanOrEqual(0);
@@ -805,6 +805,88 @@ for (const width of [390, 1440]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.evaluate(() => scrollTo(0, 0));
     await page.screenshot({ path: testInfo.outputPath(`suite-history-${width}.png`), fullPage: true });
+  });
+
+  test(`suite history sorting filters and original inventory at ${width}px`, async ({ page }, testInfo) => {
+    const files = await suiteBundle();
+    const fullId = createHash("sha256").update(JSON.stringify(files.map(file => ({ name: file.name, source: file.buffer.toString() })))).digest("hex");
+    const summary = JSON.parse(files[0].buffer.toString());
+    summary.status = "interrupted"; summary.passed = false; summary.cases = summary.cases.slice(0, 1);
+    const partialFiles = [{ ...files[0], buffer: Buffer.from(JSON.stringify(summary)) }, files[1]];
+    const partialId = createHash("sha256").update(JSON.stringify(partialFiles.map(file => ({ name: file.name, source: file.buffer.toString() })))).digest("hex");
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(process.env.NOSTEKON_APP_URL ? "/#/suite" : "/demo/#/suite");
+    await expect(page.getByRole("status", { name: "Suite evidence agreement" })).toBeVisible();
+    await page.getByRole("button", { name: "Save suite", exact: true }).click();
+    await expect(page.getByRole("status", { name: "Suite snapshot save result" })).toBeVisible();
+    await page.getByTestId("suite-input").setInputFiles(partialFiles);
+    await expect(page.getByRole("region", { name: "Suite review totals" })).toContainText("interrupted");
+    await page.getByRole("button", { name: "Save suite", exact: true }).click();
+    await expect(page.getByRole("status", { name: "Suite snapshot save result" })).toBeVisible();
+    await page.evaluate(() => new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open("nostekon-runs", 2);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction("suites", "readwrite");
+        const saved = transaction.objectStore("suites").getAll();
+        saved.onsuccess = () => {
+          for (const suite of saved.result) {
+            suite.savedAt = JSON.parse(suite.files[0].source).status === "passed" ? 1791849600000 : 1791936000000;
+            transaction.objectStore("suites").put(suite);
+          }
+        };
+        transaction.oncomplete = () => { db.close(); resolve(); };
+        transaction.onabort = () => { db.close(); reject(transaction.error); };
+      };
+    }));
+    await page.getByRole("tab", { name: "Saved suites", exact: true }).click();
+    const rows = page.locator(".suite-history-table tbody tr");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toContainText(partialId.slice(0, 12));
+    await expect(rows.locator("time")).toHaveCount(2);
+    await page.getByLabel("Sort saved suites", { exact: true }).selectOption("oldest");
+    await expect(rows.first()).toContainText(fullId.slice(0, 12));
+    await page.getByLabel("Filter suite capture", { exact: true }).selectOption("full");
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText(fullId.slice(0, 12));
+    await page.getByLabel("Filter suite runner status", { exact: true }).selectOption("interrupted");
+    await expect(page.getByText("No matching suites", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Clear suite filters", exact: true }).click();
+    await page.getByRole("searchbox", { name: "Search suites", exact: true }).fill(`${fullId.slice(0, 12).toUpperCase()} TAIL-LOSS`);
+    await expect(rows).toHaveCount(1);
+    await expect(page.getByLabel("Matching saved suites", { exact: true })).toHaveText("1 / 2");
+    await page.getByRole("button", { name: "Clear suite filters", exact: true }).click();
+    for (const theme of ["light", "dark"]) {
+      if (await page.locator("html").getAttribute("data-theme") !== theme) await page.locator("[data-theme-toggle]").click();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.evaluate(() => scrollTo(0, 0));
+      await page.screenshot({ path: testInfo.outputPath(`suite-controls-${width}-${theme}.png`), fullPage: true });
+      await page.getByRole("button", { name: `Inspect suite originals ${fullId.slice(0, 12)}`, exact: true }).click();
+      const inventory = page.getByRole("dialog", { name: "Suite originals", exact: true });
+      await expect(inventory).toContainText(fullId);
+      await expect(inventory).toContainText("Imported · unverified");
+      for (const file of files) {
+        const entry = inventory.locator("li").filter({ has: page.getByText(file.name, { exact: true }) });
+        await expect(entry).toContainText(`${file.buffer.length.toLocaleString()} bytes`);
+        await expect(entry).toContainText(createHash("sha256").update(file.buffer).digest("hex"));
+      }
+      expect(await inventory.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`suite-inventory-${width}-${theme}.png`), fullPage: true });
+      await inventory.getByRole("button", { name: "Close suite originals", exact: true }).click();
+      await expect(inventory).not.toBeVisible();
+    }
+    await page.getByLabel("Filter suite capture", { exact: true }).selectOption("partial");
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText(partialId.slice(0, 12));
+    await page.getByRole("button", { name: /Inspect suite originals/ }).click();
+    const inventory = page.getByRole("dialog", { name: "Suite originals", exact: true });
+    await expect(inventory.getByText("Missing original", { exact: true })).toHaveCount(2);
+    await inventory.press("Escape");
+    await expect(inventory).not.toBeVisible();
+    await expect(page.getByRole("button", { name: /Inspect suite originals/ })).toBeFocused();
+    await page.getByRole("button", { name: /Reopen suite/ }).click();
+    await expect(page.getByRole("region", { name: "Suite review totals" })).toContainText("failed");
   });
 
   test(`app information exposes actual engine and storage origin at ${width}px`, async ({ page }, testInfo) => {
@@ -1040,6 +1122,9 @@ for (const width of [390, 1440]) {
       };
     }));
     await page.getByRole("tab", { name: "Saved suites", exact: true }).click();
+    await page.getByRole("button", { name: /Inspect suite originals/ }).click();
+    await expect(page.getByRole("alert")).toContainText("integrity check failed");
+    await expect(page.getByRole("dialog", { name: "Suite originals", exact: true })).not.toBeVisible();
     await page.getByRole("button", { name: /Reopen suite/ }).click();
     await expect(page.getByRole("alert")).toContainText("integrity check failed");
     await expect(page.getByRole("status", { name: "Suite evidence agreement" })).toHaveCount(0);
