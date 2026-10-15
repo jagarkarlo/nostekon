@@ -2,6 +2,20 @@ import type { Report, RPOResult } from "./report";
 import type { SavedSuite } from "./runStore";
 
 export type SuiteHistorySort = "newest" | "oldest";
+export type SuiteStatusFilter = "all" | LabSuite["status"];
+export type SuiteCaptureFilter = "all" | "full" | "partial";
+
+export function filterSavedSuites(suites: readonly SavedSuite[], filters: { query: string; status: SuiteStatusFilter; capture: SuiteCaptureFilter }): SavedSuite[] {
+  const terms = filters.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return suites.filter(suite => {
+    const summary = parseSuite(suite.files.find(file => file.name === "suite.json")!.source);
+    const full = summary.cases.length === 3 && summary.cases.every(item => suite.files.some(file => file.name === item.drillRun));
+    const text = [suite.id, summary.status, ...suite.files.map(file => file.name), ...summary.cases.map(item => item.name)].join(" ").toLowerCase();
+    return (filters.status === "all" || summary.status === filters.status)
+      && (filters.capture === "all" || (filters.capture === "full" ? full : !full))
+      && terms.every(term => text.includes(term));
+  });
+}
 
 export function sortSavedSuites(suites: readonly SavedSuite[], order: SuiteHistorySort): SavedSuite[] {
   return [...suites].sort((left, right) => {

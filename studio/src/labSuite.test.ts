@@ -1,7 +1,7 @@
 import { Zip, ZipPassThrough, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { readEvidenceBundle } from "./evidenceBundle";
-import { createSuiteReview, evaluateSuite, parseSuite, sortSavedSuites } from "./labSuite";
+import { createSuiteReview, evaluateSuite, filterSavedSuites, parseSuite, sortSavedSuites } from "./labSuite";
 import type { Report } from "./report";
 import type { SavedSuite } from "./runStore";
 
@@ -25,6 +25,32 @@ const summary = {
     observedExitCode: name === "tail-loss" ? 1 : 0, passed: true,
   })),
 };
+
+describe("suite history filters", () => {
+  const full: SavedSuite = { id: "a".repeat(64), savedAt: 20, files: [
+    { name: "suite.json", source: JSON.stringify(summary) },
+    ...summary.cases.map(item => ({ name: item.drillRun, source: "{}" })),
+  ] };
+  const partial: SavedSuite = { id: "b".repeat(64), savedAt: 10, files: [
+    { name: "suite.json", source: JSON.stringify({ ...summary, status: "interrupted", passed: false, cases: summary.cases.slice(0, 1) }) },
+    { name: summary.cases[0].drillRun, source: "{}" },
+  ] };
+  const missing: SavedSuite = { ...full, id: "c".repeat(64), files: full.files.slice(0, 3) };
+  it("combines case-insensitive identity and filename terms with runner status", () => {
+    expect(filterSavedSuites([full, partial], { query: "AAAA TAIL-LOSS", status: "passed", capture: "all" })).toEqual([full]);
+    expect(filterSavedSuites([full, partial], { query: "tail-loss", status: "interrupted", capture: "all" })).toEqual([]);
+    expect(filterSavedSuites([full, partial], { query: "  ZERO-loss  ", status: "interrupted", capture: "all" })).toEqual([partial]);
+  });
+  it("requires three declared cases and each original file for a full capture", () => {
+    expect(filterSavedSuites([full, partial, missing], { query: "", status: "all", capture: "full" })).toEqual([full]);
+    expect(filterSavedSuites([full, partial, missing], { query: "", status: "all", capture: "partial" })).toEqual([partial, missing]);
+  });
+  it("does not confuse complete captures or runner claims with passing evidence", () => {
+    const failed = { ...full, files: [{ name: "suite.json", source: JSON.stringify({ ...summary, status: "failed", passed: false }) }, ...full.files.slice(1)] };
+    expect(filterSavedSuites([failed], { query: "", status: "failed", capture: "full" })).toEqual([failed]);
+    expect(full.files[0].source).toBe(JSON.stringify(summary));
+  });
+});
 
 describe("lab suite contract", () => {
   it("reads the runner summary without substituting it for evaluated evidence", () => {
