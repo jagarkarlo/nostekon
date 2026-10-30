@@ -579,15 +579,18 @@ for (const width of [390, 1440]) {
   });
 
   test(`signature trust verifies native Go sidecars without upgrading recovery at ${width}px`, async ({ page, context, browser, baseURL }, testInfo) => {
+    test.slow();
     const directory = await mkdtemp(join(tmpdir(), "nostekon-signature-"));
     const privatePath = join(directory, "private.pem");
     const publicPath = join(directory, "public.pem");
     const sidecarPath = join(directory, "run.attestation.json");
+    const attest = join(directory, "nostekon-attest");
     const root = new URL("../../", import.meta.url);
     const evidencePath = new URL("../../examples/runs/k3d-ledger-tail-loss.run.json", import.meta.url).pathname;
     try {
-      execFileSync("go", ["run", "./cmd/nostekon-attest", "keygen", "--private", privatePath, "--public", publicPath], { cwd: root });
-      execFileSync("go", ["run", "./cmd/nostekon-attest", "sign", "--evidence", evidencePath, "--key", privatePath, "--output", sidecarPath], { cwd: root });
+      execFileSync("go", ["build", "-o", attest, "./cmd/nostekon-attest"], { cwd: root });
+      execFileSync(attest, ["keygen", "--private", privatePath, "--public", publicPath]);
+      execFileSync(attest, ["sign", "--evidence", evidencePath, "--key", privatePath, "--output", sidecarPath]);
       const evidence = await readFile(evidencePath);
       const publicKey = await readFile(publicPath);
       const sidecar = await readFile(sidecarPath);
@@ -652,7 +655,7 @@ for (const width of [390, 1440]) {
       const exportedSidecar = join(directory, "exported.attestation.json");
       await writeFile(exportedEvidence, archive["nostekon.run.json"]);
       await writeFile(exportedSidecar, archive["nostekon.run.attestation.json"]);
-      execFileSync("go", ["run", "./cmd/nostekon-attest", "verify", "--evidence", exportedEvidence, "--attestation", exportedSidecar, "--trusted-key", publicPath], { cwd: root });
+      execFileSync(attest, ["verify", "--evidence", exportedEvidence, "--attestation", exportedSidecar, "--trusted-key", publicPath]);
       const recipient = await browser.newContext({ baseURL, viewport: { width, height: 1000 } });
       try {
         const transferred = await recipient.newPage();
