@@ -32,10 +32,10 @@ The browser demo runs the same Go evaluator in WebAssembly. It includes a record
 
 Read [verification levels](levels.md) before treating a green result as a recovery guarantee. V0 through V4 answer different questions, and an unmeasured objective is not a passed objective. The [write ledger guide](concepts/write-ledger-rpo.md) explains what acknowledged-write evidence can establish about data loss.
 
-The current runner observes V0 through V3 for one PostgreSQL logical restore. Scheduled drills, production backup adapters, workload-specific checks and trusted provenance remain on the [roadmap](/roadmap/).
+The lab runner measures V0 through V3 for one PostgreSQL logical restore and adds V4 data-loss evidence from its acknowledged-write ledger. Backup rehearsals can add V4 checks from a reviewed validation profile. Scheduled drills, production backup adapters, owner-validated business rules and trusted provenance remain on the [roadmap](/roadmap/).
 
 ## Project Links
 
 [Product](/) · [System design](/product/) · [Evidence model](/evidence/) · [GitHub](https://github.com/jagarkarlo/nostekon)
 
-Source access currently requires permission because the repository is private.
+The source is public under the Apache-2.0 license.
