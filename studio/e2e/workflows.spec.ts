@@ -1271,8 +1271,16 @@ for (const width of [390, 1440]) {
     expect(await readFile((await (await download).path())!)).toEqual(files[0].buffer);
     if (width === 390) {
       const table = page.getByRole("region", { name: "Lab jobs table" });
-      await table.focus();
-      expect(await table.evaluate(element => { element.scrollLeft = element.scrollWidth; return element.scrollLeft > 0; })).toBe(true);
+      expect(await table.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      const row = table.getByRole("row", { name: new RegExp(identifier.slice(0, 8)) });
+      for (const label of ["Status", "Writes", "RPO budget", "Started"]) {
+        const cell = row.locator(`td[data-label="${label}"]`);
+        await expect(cell).toBeVisible();
+        const bounds = await cell.boundingBox();
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      }
+      await expect(row.locator('td[data-label="Status"]')).toHaveText("completed");
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`lab-completed-${width}.png`), fullPage: true });

@@ -590,6 +590,13 @@ button.finding:hover { filter: brightness(1.12); }
   .suite-history-table td { padding: 8px 0; border: 0; white-space: normal; overflow-wrap: anywhere; }
   .suite-history-table td[data-label]::before { display: block; margin-bottom: 7px; color: var(--ink-2); font-family: "DM Sans", sans-serif; content: attr(data-label); }
   .suite-history-table td.suite-row-action { position: absolute; top: 16px; right: 0; padding: 0; }
+  .lab-workspace .lab-jobs-table { min-width: 0; width: 100%; }
+  .lab-jobs-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .lab-jobs-table tbody { display: block; }
+  .lab-jobs-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; padding: 18px 0; border-top: 1px solid var(--line); }
+  .lab-jobs-table tbody th { grid-column: 1 / -1; padding: 0; border: 0; font-size: 14px; }
+  .lab-jobs-table td { padding: 0; border: 0; white-space: normal; overflow-wrap: anywhere; }
+  .lab-jobs-table td[data-label]::before { display: block; margin-bottom: 6px; color: var(--ink-2); font-family: "DM Sans", sans-serif; content: attr(data-label); }
   .section-toolbar { gap: 10px; }
   .section-toolbar h2 { width: 100%; }
   .run-search { flex: 1; min-width: 140px; }

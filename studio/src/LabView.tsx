@@ -187,9 +187,9 @@ export function LabView({ active, onReview }: { active: boolean; onReview: (file
       <button className="primary" type="submit" disabled={!enabled || checking || busy || running || recoveryRequired}><Play size={15} />Run suite</button>
     </form>
     {recoveryRequired && <p className="banner bad" role="alert"><XCircle size={16} />Interrupted jobs require cleanup confirmation.</p>}
-    {jobs.length > 0 && <section aria-label="Lab job history"><div className="table-scroll" role="region" aria-label="Lab jobs table" tabIndex={0}><table className="runs-table">
+    {jobs.length > 0 && <section aria-label="Lab job history"><div className="table-scroll" role="region" aria-label="Lab jobs table" tabIndex={0}><table className="runs-table lab-jobs-table">
       <thead><tr><th>Job</th><th>Status</th><th>Writes</th><th>RPO budget</th><th>Started</th></tr></thead>
-      <tbody>{jobs.map(item => <tr key={item.id}><th scope="row"><button className="run-open" type="button" onClick={() => setSelected(item.id)} aria-pressed={job?.id === item.id}>{item.id.slice(0, 8)}</button></th><td>{item.status}</td><td>{item.options.writes}</td><td>{item.options.rpoSeconds}s</td><td>{new Date(item.startedAt).toLocaleString()}</td></tr>)}</tbody>
+      <tbody>{jobs.map(item => <tr key={item.id}><th scope="row"><button className="run-open" type="button" onClick={() => setSelected(item.id)} aria-pressed={job?.id === item.id}>{item.id.slice(0, 8)}</button></th><td data-label="Status">{item.status}</td><td data-label="Writes">{item.options.writes}</td><td data-label="RPO budget">{item.options.rpoSeconds}s</td><td data-label="Started">{new Date(item.startedAt).toLocaleString()}</td></tr>)}</tbody>
     </table></div></section>}
     {job && <section className="lab-detail" aria-label="Selected lab job">
       <div className="section-toolbar"><h2>Job {job.id.slice(0, 8)}</h2><div className="library-actions">
