@@ -409,7 +409,7 @@ an error. The [lab walkthrough](site/src/content/docs/start.md) covers
 prerequisites and proxy-restricted image pulls. This is not production-safe
 orchestration.
 
-The Astro product site connects the full browser Studio with MkDocs Material
+The Astro product site connects the full browser Studio with Zensical
 documentation under `/docs/`. Install Python 3.12+, Node 22+ and Go, then build
 the demo and documentation before starting the site:
 
@@ -424,8 +424,9 @@ npm run dev --prefix site
 ```
 
 Open `http://127.0.0.1:4321`. Rebuild docs after Markdown changes with
-`bash scripts/build-docs.sh`; `mkdocs build --strict` checks navigation and
-internal Markdown links. The demo at `/demo/` evaluates reports in the browser;
+`bash scripts/build-docs.sh`; `zensical build --strict` checks navigation and
+internal Markdown links. Zensical, the successor to Material for MkDocs, reads
+the existing `mkdocs.yml` with its `classic` theme variant. The demo at `/demo/` evaluates reports in the browser;
 the standalone Studio can also connect to the local Go API. Nostekon is
 pre-alpha and only executes the narrow disposable lab drill. A paid enterprise
 edition is not planned until the open-source restore workflow works reliably

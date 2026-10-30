@@ -8,6 +8,7 @@ edit_uri: ''
 strict: true
 theme:
   name: material
+  variant: classic
   font: false
   logo: assets/nostekon-mark.svg
   favicon: assets/nostekon-mark.svg

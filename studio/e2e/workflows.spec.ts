@@ -1786,10 +1786,14 @@ test("docs, deep links, search and demo navigation work", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /^Nostekon Documentation/ })).toBeVisible();
   await page.getByRole("link", { name: "Installation", exact: true }).first().click();
   await expect(page).toHaveURL(/\/docs\/start\//);
-  const search = page.getByRole("textbox", { name: "Search", exact: true });
-  await search.click();
+  await page.getByRole("button", { name: /^Search/ }).click();
+  const search = page.getByRole("dialog", { name: "Search" }).getByRole("combobox", { name: "Search", exact: true });
   await search.pressSequentially("DrillRun", { delay: 40 });
-  await expect(page.locator(".md-search-result__link").first()).toBeVisible();
+  const results = page.getByRole("listbox", { name: "Search results" });
+  await expect(results.getByRole("option").first()).toBeVisible();
+  await results.getByRole("option", { name: "DrillRun evidence", exact: true }).click();
+  await expect(page).toHaveURL(/\/docs\/reference\/drillrun-evidence\//);
+  await expect(page.getByRole("heading", { level: 1, name: "DrillRun evidence" })).toBeVisible();
   for (const path of ["/docs/guides/k3d-isolated-restore/", "/docs/reference/drillrun-evidence/", "/demo/"]) {
     expect((await page.request.get(path)).status()).toBe(200);
   }
